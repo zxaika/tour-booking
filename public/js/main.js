@@ -69,24 +69,26 @@ const TOURS = [
 let bookedDates = {};
 let priceRules = { roomDatePrices: {}, tourDatePrices: {}, closedDates: {} };
 
-async function loadPrices() {
-    try {
-        const response = await fetch('/api/prices');
-        const prices = await response.json();
-        Object.entries(prices.rooms || {}).forEach(([id, room]) => {
-            if (ROOMS[id]) ROOMS[id].price = Number(room.price || ROOMS[id].price);
-        });
-        priceRules = prices;
-        Object.entries(prices.tours || {}).forEach(([id, tourPrice]) => {
-            const tour = TOURS.find(t => String(t.id) === String(id));
-            if (tour) tour.price = Number(tourPrice.price || tour.price);
-        });
-    } catch (error) {
-        console.error('Ошибка загрузки цен:', error);
-    }
-}
+// ========== ДОБАВЛЕННАЯ ФУНКЦИЯ hasClosedDates ДЛЯ КЛИЕНТА ==========
+function hasClosedDates(checkIn, checkOut, type, prices) {
+    const closedDates = prices?.closedDates || {};
+    const dates = [];
+    const start = new Date(checkIn);
+    const end = new Date(checkOut);
 
-// ========== ИСПРАВЛЕННЫЕ ФУНКЦИИ РАБОТЫ С ДАТАМИ ==========
+    // Проверяем все даты в диапазоне
+    while (start < end) {
+        const dateStr = toLocalDateString(start);
+        if (closedDates[dateStr]) {
+            return dateStr;
+        }
+        start.setDate(start.getDate() + 1);
+    }
+    return null;
+}
+// ========== КОНЕЦ ДОБАВЛЕННОЙ ФУНКЦИИ ==========
+
+// ========== ФУНКЦИИ РАБОТЫ С ДАТАМИ ==========
 function toLocalDateString(date) {
     // Если это уже строка в формате YYYY-MM-DD, возвращаем как есть
     if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -136,7 +138,24 @@ function normalizeDate(date) {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-// ========== КОНЕЦ ИСПРАВЛЕННЫХ ФУНКЦИЙ ==========
+// ========== КОНЕЦ ФУНКЦИЙ РАБОТЫ С ДАТАМИ ==========
+
+async function loadPrices() {
+    try {
+        const response = await fetch('/api/prices');
+        const prices = await response.json();
+        Object.entries(prices.rooms || {}).forEach(([id, room]) => {
+            if (ROOMS[id]) ROOMS[id].price = Number(room.price || ROOMS[id].price);
+        });
+        priceRules = prices;
+        Object.entries(prices.tours || {}).forEach(([id, tourPrice]) => {
+            const tour = TOURS.find(t => String(t.id) === String(id));
+            if (tour) tour.price = Number(tourPrice.price || tour.price);
+        });
+    } catch (error) {
+        console.error('Ошибка загрузки цен:', error);
+    }
+}
 
 async function loadBookedDates() {
     try {
@@ -192,17 +211,19 @@ function createRoomCalendar(roomId, roomPrice) {
                     return;
                 }
 
-                // ИСПРАВЛЕНО: используем toLocalDateString для преобразования
                 const checkInStr = toLocalDateString(checkIn);
                 const checkOutStr = toLocalDateString(checkOut);
-                let total = roomPrice * nights;
+
+                // Проверяем закрытые даты через сервер
                 try {
-                    total = await getQuote({ type: 'room', roomId, checkIn: checkInStr, checkOut: checkOutStr });
+                    await getQuote({ type: 'room', roomId, checkIn: checkInStr, checkOut: checkOutStr });
                 } catch (error) {
                     alert('❌ ' + error.message);
                     instance.clear();
                     return;
                 }
+
+                const total = roomPrice * nights;
 
                 const response = await fetch('/api/check-availability', {
                     method: 'POST',
@@ -212,7 +233,6 @@ function createRoomCalendar(roomId, roomPrice) {
                 const result = await response.json();
 
                 if (result.available) {
-                    // ИСПРАВЛЕНО: передаем checkIn и checkOut как строки
                     showBookingForm('room', roomId, ROOMS[roomId].name, roomPrice, checkInStr, checkOutStr, nights, total);
                 } else {
                     alert('❌ ' + (result.reason || 'К сожалению, эти даты уже заняты. Выберите другие.'));
@@ -248,9 +268,9 @@ function createTourCalendar(tour) {
                 const daysCount = tour.days || 1;
                 const checkOut = new Date(checkIn);
                 checkOut.setDate(checkOut.getDate() + Math.max(daysCount - 1, 0));
-                // ИСПРАВЛЕНО: используем toLocalDateString
                 const checkInStr = toLocalDateString(checkIn);
                 const checkOutStr = toLocalDateString(checkOut);
+
                 let total = tour.price;
                 try {
                     total = await getQuote({ type: 'tour', tourId: tour.id, tourName: tour.name, checkIn: checkInStr, checkOut: checkOutStr });
@@ -259,7 +279,6 @@ function createTourCalendar(tour) {
                     instance.clear();
                     return;
                 }
-                // ИСПРАВЛЕНО: передаем строки
                 showBookingForm('tour', tour.id, tour.name, tour.price, checkInStr, checkOutStr, daysCount, total);
             }
         }
@@ -268,9 +287,7 @@ function createTourCalendar(tour) {
     return calendarDiv;
 }
 
-// ИСПРАВЛЕНА: функция showBookingForm теперь принимает строки с датами
 function showBookingForm(type, id, name, price, checkInDate, checkOutDate, nights, total) {
-    // checkInDate и checkOutDate теперь строки в формате YYYY-MM-DD
     const checkInStr = String(checkInDate);
     const checkOutStr = String(checkOutDate);
     const formattedCheckIn = formatDate(checkInStr);
@@ -343,7 +360,6 @@ function closeBookingForm() {
     if (overlay) overlay.remove();
 }
 
-// ИСПРАВЛЕНА: функция submitBooking
 async function submitBooking(e) {
     e.preventDefault();
 
@@ -351,7 +367,6 @@ async function submitBooking(e) {
     const id = parseInt(document.getElementById('formId').value);
     const name = document.getElementById('formName').value;
 
-    // Даты уже в правильном формате YYYY-MM-DD из hidden полей
     const checkIn = document.getElementById('formCheckIn').value;
     const checkOut = document.getElementById('formCheckOut').value;
 
@@ -365,8 +380,8 @@ async function submitBooking(e) {
         guestTelegram: document.getElementById('guestTelegram').value,
         guestEmail: document.getElementById('guestEmail').value,
         guestsCount: parseInt(document.getElementById('guestsCount').value),
-        checkIn: checkIn,  // УЖЕ в формате YYYY-MM-DD
-        checkOut: checkOut, // УЖЕ в формате YYYY-MM-DD
+        checkIn: checkIn,
+        checkOut: checkOut,
         totalPrice: parseInt(document.getElementById('formTotal').value),
         notes: document.getElementById('notes').value
     };
@@ -405,7 +420,7 @@ async function submitBooking(e) {
     }
 }
 
-// ========== ОСТАЛЬНЫЕ ФУНКЦИИ БЕЗ ИЗМЕНЕНИЙ ==========
+// ========== ОСТАЛЬНЫЕ ФУНКЦИИ ==========
 
 async function loadRoomMedia() {
     try {
