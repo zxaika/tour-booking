@@ -172,9 +172,23 @@ async function getQuote(payload) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Дата недоступна');
-    return result.total;
+
+    const text = await response.text();
+
+    let result = {};
+    try {
+        result = text ? JSON.parse(text) : {};
+    } catch (e) {
+        console.error('Некорректный ответ /api/quote:', text);
+        throw new Error('Сервер вернул ошибку. Проверь логи Vercel.');
+    }
+
+    if (!response.ok) {
+        console.error('/api/quote error:', result);
+        throw new Error(result.error || 'Дата недоступна');
+    }
+
+    return Number(result.total || 0);
 }
 
 function getClosedDateList() {
