@@ -39,24 +39,42 @@ function clone(value) {
     return JSON.parse(JSON.stringify(value));
 }
 
-// ========== ФУНКЦИЯ ВАЛИДАЦИИ ДАТ ==========
+// ========== УСИЛЕННАЯ ВАЛИДАЦИЯ ДАТ ==========
 function validateDate(dateStr) {
     if (!dateStr) return null;
     const str = String(dateStr).trim();
+
+    // Если это не строка - пытаемся преобразовать
+    if (typeof str !== 'string') {
+        console.error('❌ validateDate: received non-string:', str);
+        throw new Error(`Invalid date: expected string, got ${typeof str}`);
+    }
+
     // Проверяем формат YYYY-MM-DD
     if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+        console.error(`❌ validateDate: invalid format "${str}"`);
         throw new Error(`Invalid date format: "${str}". Expected YYYY-MM-DD`);
     }
+
     // Проверяем, что дата существует
     const [year, month, day] = str.split('-').map(Number);
     const date = new Date(year, month - 1, day);
     if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+        console.error(`❌ validateDate: date doesn't exist "${str}"`);
         throw new Error(`Invalid date: "${str}" does not exist`);
     }
+
     return str;
 }
 
-// ========== ФУНКЦИЯ ДЛЯ РАБОТЫ С ДАТАМИ ==========
+function validateDateOrThrow(dateStr, fieldName = 'date') {
+    try {
+        return validateDate(dateStr);
+    } catch (error) {
+        throw new Error(`Field "${fieldName}": ${error.message}`);
+    }
+}
+
 function dateRange(startDate, endDate, inclusive = false) {
     const dates = [];
     const current = new Date(startDate);
@@ -76,6 +94,185 @@ function formatRuDate(dateStr) {
     if (!dateStr) return '';
     const [year, month, day] = String(dateStr).split('-').map(Number);
     return new Date(year, month - 1, day).toLocaleDateString('ru-RU');
+}
+
+// ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+function isRoomAvailable(roomId, checkIn, checkOut) {
+    const data = loadBookings();
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
+
+    for (const booking of data.bookings) {
+        if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
+            const bookingIn = new Date(booking.checkIn);
+            const bookingOut = new Date(booking.checkOut);
+            if (!(checkOutDate <= bookingIn || checkInDate >= bookingOut)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function getActiveBookings() {
+    const data = loadBookings();
+    return data.bookings.filter(b => b.status === 'confirmed');
+}
+
+function getRoomNightPrice(roomId, dateStr, prices) {
+    const room = prices.rooms?.[roomId];
+    if (!room) return 0;
+
+    // Проверяем специальную цену на дату
+    const datePrice = prices.roomDatePrices?.[roomId]?.[dateStr];
+    if (datePrice) return datePrice;
+
+    // Применяем динамические цены
+    if (prices.occupancyRules?.enabled) {
+        const occupancy = getOccupancyForDate(dateStr, prices);
+        for (const rule of (prices.occupancyRules.thresholds || [])) {
+            if (occupancy >= rule.occupancy) {
+                return room.price * (1 + rule.percent / 100);
+            }
+        }
+    }
+
+    return room.price;
+}
+
+function getTourDatePrice(tourId, tourName, dateStr, prices) {
+    // Проверяем специальную цену на дату
+    if (tourId && prices.tourDatePrices?.[tourId]?.[dateStr]) {
+        return prices.tourDatePrices[tourId][dateStr];
+    }
+
+    // Ищем тур по имени или ID
+    const tour = prices.tours?.[tourId] || Object.values(prices.tours || {}).find(t => t.name === tourName);
+    return tour?.price || 0;
+}
+
+function getOccupancyForDate(dateStr, prices) {
+    const data = loadBookings();
+    const totalRooms = Object.keys(prices.rooms || {}).length;
+    if (totalRooms === 0) return 0;
+
+    let booked = 0;
+    const date = new Date(dateStr);
+
+    for (const booking of data.bookings) {
+        if (booking.status === 'cancelled' || booking.type === 'tour') continue;
+        const checkIn = new Date(booking.checkIn);
+        const checkOut = new Date(booking.checkOut);
+        if (date >= checkIn && date < checkOut) {
+            booked++;
+        }
+    }
+
+    return Math.round((booked / totalRooms) * 100);
+}
+
+function hasClosedDates(checkIn, checkOut, type, prices) {
+    const closedDates = prices?.closedDates || {};
+    const dates = dateRange(checkIn, checkOut, true);
+    for (const date of dates) {
+        if (closedDates[date]) return date;
+    }
+    return null;
+}
+
+function calculateBookingPrice({ type, roomId, tourId, tourName, checkIn, checkOut, clientTotal, prices }) {
+    try {
+        const validCheckIn = validateDate(checkIn);
+        const validCheckOut = validateDate(checkOut);
+
+        if ((type || 'room') === 'tour') {
+            return getTourDatePrice(tourId, tourName, validCheckIn, prices) || Number(clientTotal || 0);
+        }
+        const nights = dateRange(validCheckIn, validCheckOut, false);
+        const total = nights.reduce((sum, dateStr) => sum + getRoomNightPrice(roomId, dateStr, prices), 0);
+        return total || Number(clientTotal || 0);
+    } catch (error) {
+        console.error('Ошибка расчета цены:', error);
+        return Number(clientTotal || 0);
+    }
+}
+
+function eachBookedDay(booking, callback) {
+    if (booking.status === 'cancelled') return;
+    try {
+        const start = new Date(validateDate(booking.checkIn));
+        const end = new Date(validateDate(booking.checkOut));
+        while (start < end) {
+            callback(start.toISOString().split('T')[0]);
+            start.setDate(start.getDate() + 1);
+        }
+    } catch (error) {
+        console.error('Error in eachBookedDay:', error);
+    }
+}
+
+function getToursInfo() {
+    const prices = loadPrices();
+    return Object.entries(prices.tours || {}).map(([id, tour]) => ({
+        id,
+        ...tour
+    }));
+}
+
+function listMediaFiles() {
+    const dir = path.join(PUBLIC_DIR, 'images', 'mainimg');
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir)
+        .filter(f => /\.(jpg|jpeg|png|gif|webp|mp4|webm)$/i.test(f))
+        .map(f => `images/mainimg/${f}`);
+}
+
+function listRoomImageFiles() {
+    const rooms = {};
+    const dir = path.join(PUBLIC_DIR, 'images', 'rooms');
+    if (!fs.existsSync(dir)) return rooms;
+
+    const files = fs.readdirSync(dir).filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
+    for (const file of files) {
+        const match = file.match(/^room-(\d+)/);
+        if (match) {
+            const id = match[1];
+            if (!rooms[id]) rooms[id] = [];
+            rooms[id].push(`images/rooms/${file}`);
+        }
+    }
+    return rooms;
+}
+
+function listTourImageFiles() {
+    const tours = {};
+    const dir = path.join(PUBLIC_DIR, 'images', 'tours');
+    if (!fs.existsSync(dir)) return tours;
+
+    const files = fs.readdirSync(dir).filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f));
+    for (const file of files) {
+        const match = file.match(/^tour-(\d+)/);
+        if (match) {
+            const id = match[1];
+            if (!tours[id]) tours[id] = [];
+            tours[id].push(`images/tours/${file}`);
+        }
+    }
+    return tours;
+}
+
+function ensureDir(dir) {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+function loadTgState() {
+    return clone(tgStateCache);
+}
+
+async function saveTgState(data) {
+    tgStateCache = clone(data);
+    const { error } = await supabase.from('app_settings').upsert({ key: 'telegram_state', value: tgStateCache });
+    if (error) throw error;
 }
 
 const DEFAULT_PRICES = {
@@ -192,12 +389,31 @@ function loadBookings() {
 }
 
 async function saveBookings(data) {
+    console.log('📦 saveBookings: saving', data.bookings?.length || 0, 'bookings');
+
     bookingsCache = clone(data);
-    // Используем upsert вместо delete + insert для избежания проблем с типами
     const rows = (data.bookings || []).map(booking => {
-        // Валидируем даты перед сохранением
-        const checkIn = booking.checkIn ? validateDate(booking.checkIn) : null;
-        const checkOut = booking.checkOut ? validateDate(booking.checkOut) : null;
+        // ВАЖНО: валидируем даты, но если они null - оставляем null
+        let checkIn = null;
+        let checkOut = null;
+
+        if (booking.checkIn) {
+            try {
+                checkIn = validateDate(booking.checkIn);
+            } catch (e) {
+                console.error(`❌ Invalid checkIn for booking ${booking.id}:`, booking.checkIn);
+                throw new Error(`Booking ${booking.id}: invalid checkIn "${booking.checkIn}"`);
+            }
+        }
+
+        if (booking.checkOut) {
+            try {
+                checkOut = validateDate(booking.checkOut);
+            } catch (e) {
+                console.error(`❌ Invalid checkOut for booking ${booking.id}:`, booking.checkOut);
+                throw new Error(`Booking ${booking.id}: invalid checkOut "${booking.checkOut}"`);
+            }
+        }
 
         return {
             id: Number(booking.id),
@@ -206,7 +422,7 @@ async function saveBookings(data) {
             check_in: checkIn,
             check_out: checkOut,
             created_at: booking.createdAt || new Date().toISOString(),
-            data: { ...booking, checkIn, checkOut } // сохраняем валидные даты
+            data: booking
         };
     });
 
@@ -217,13 +433,18 @@ async function saveBookings(data) {
         .neq('id', 0);
     if (deleteError) throw deleteError;
 
-    // Вставляем новые записи, только если они есть
+    // Вставляем новые записи
     if (rows.length) {
+        console.log('📊 Inserting rows:', rows.map(r => ({ id: r.id, check_in: r.check_in, check_out: r.check_out })));
         const { error: insertError } = await supabase
             .from('bookings')
             .insert(rows);
-        if (insertError) throw insertError;
+        if (insertError) {
+            console.error('❌ Insert error:', insertError);
+            throw insertError;
+        }
     }
+    console.log('✅ saveBookings completed');
 }
 
 function loadPrices() {
@@ -236,41 +457,11 @@ async function savePrices(data) {
     if (error) throw error;
 }
 
-async function saveTelegramPhoto(message, target) {
-    const botToken = process.env.TG_BOT_TOKEN;
-    const photos = message.photo || [];
-    if (!photos.length) throw new Error('Фото не найдено');
-    const best = photos[photos.length - 1];
-    const fileInfoRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${best.file_id}`);
-    const fileInfo = await fileInfoRes.json();
-    if (!fileInfo.ok || !fileInfo.result?.file_path) throw new Error('Не удалось получить файл из Telegram');
-    const ext = path.extname(fileInfo.result.file_path) || '.jpg';
-    let dir;
-    let fileName;
-    const stamp = Date.now();
-    if (target.kind === 'room') {
-        dir = path.join(PUBLIC_DIR, 'images', 'rooms');
-        fileName = `room-${target.id}-tg-${stamp}${ext}`;
-    } else if (target.kind === 'tour') {
-        dir = path.join(PUBLIC_DIR, 'images', 'tours');
-        fileName = `tour-${target.id}-tg-${stamp}${ext}`;
-    } else {
-        dir = path.join(PUBLIC_DIR, 'images', 'mainimg');
-        fileName = `mainimg-tg-${stamp}${ext}`;
-    }
-    ensureDir(dir);
-    const fileRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${fileInfo.result.file_path}`);
-    const buffer = await fileRes.buffer();
-    const outputPath = path.join(dir, fileName);
-    fs.writeFileSync(outputPath, buffer);
-    return path.relative(PUBLIC_DIR, outputPath).replace(/\\/g, '/');
-}
+// ========== МАРШРУТЫ ==========
 
-// Получить актуальные цены для сайта
 app.get('/api/prices', (req, res) => {
     res.json(loadPrices());
 });
-
 
 app.get('/api/media', (req, res) => {
     res.json({ media: listMediaFiles() });
@@ -288,9 +479,10 @@ app.get('/api/available-rooms', (req, res) => {
     try {
         const { checkIn, checkOut } = req.query;
 
-        // Валидируем даты
-        const validCheckIn = validateDate(checkIn);
-        const validCheckOut = validateDate(checkOut);
+        console.log('📥 /api/available-rooms:', { checkIn, checkOut });
+
+        const validCheckIn = validateDateOrThrow(checkIn, 'checkIn');
+        const validCheckOut = validateDateOrThrow(checkOut, 'checkOut');
 
         if (new Date(validCheckOut) <= new Date(validCheckIn)) {
             return res.status(400).json({ error: 'Дата выезда должна быть позже даты заезда' });
@@ -298,39 +490,44 @@ app.get('/api/available-rooms', (req, res) => {
 
         const prices = loadPrices();
         const nights = dateRange(validCheckIn, validCheckOut, false).length;
-        const rooms = Object.entries(prices.rooms).filter(([id]) => isRoomAvailable(id, validCheckIn, validCheckOut)).map(([id, room]) => ({
-            id: Number(id),
-            name: room.name,
-            price: room.price,
-            total: calculateBookingPrice({ type: 'room', roomId: id, checkIn: validCheckIn, checkOut: validCheckOut, prices })
-        }));
+        const rooms = Object.entries(prices.rooms)
+            .filter(([id]) => isRoomAvailable(id, validCheckIn, validCheckOut))
+            .map(([id, room]) => ({
+                id: Number(id),
+                name: room.name,
+                price: room.price,
+                total: calculateBookingPrice({ type: 'room', roomId: id, checkIn: validCheckIn, checkOut: validCheckOut, prices })
+            }));
         res.json({ checkIn: validCheckIn, checkOut: validCheckOut, nights, rooms });
     } catch (error) {
+        console.error('❌ /api/available-rooms error:', error);
         return res.status(400).json({ error: error.message });
     }
 });
 
-// Получить правила цен и закрытые даты
 app.post('/api/quote', (req, res) => {
     try {
         const { type, roomId, tourId, tourName, checkIn, checkOut } = req.body;
 
-        // Валидируем даты
-        const validCheckIn = validateDate(checkIn);
-        const validCheckOut = validateDate(checkOut);
+        console.log('📥 /api/quote:', { type, roomId, tourId, checkIn, checkOut });
+
+        const validCheckIn = validateDateOrThrow(checkIn, 'checkIn');
+        const validCheckOut = validateDateOrThrow(checkOut, 'checkOut');
 
         const prices = loadPrices();
         const closedDate = hasClosedDates(validCheckIn, validCheckOut, type || 'room', prices);
-        if (closedDate) return res.status(400).json({ error: `Бронирование закрыто на дату ${formatRuDate(closedDate)}` });
+        if (closedDate) {
+            return res.status(400).json({ error: `Бронирование закрыто на дату ${formatRuDate(closedDate)}` });
+        }
 
         const total = calculateBookingPrice({ type, roomId, tourId, tourName, checkIn: validCheckIn, checkOut: validCheckOut, prices });
         res.json({ total });
     } catch (error) {
+        console.error('❌ /api/quote error:', error);
         return res.status(400).json({ error: error.message });
     }
 });
 
-// Получить занятые даты для номеров
 app.get('/api/booked-dates', (req, res) => {
     const data = loadBookings();
     const bookedDates = {};
@@ -363,14 +560,12 @@ app.get('/api/booked-dates', (req, res) => {
     res.json(bookedDates);
 });
 
-// Проверить доступность номера
 app.post('/api/check-availability', (req, res) => {
     try {
         const { roomId, checkIn, checkOut } = req.body;
 
-        // Валидируем даты
-        const validCheckIn = validateDate(checkIn);
-        const validCheckOut = validateDate(checkOut);
+        const validCheckIn = validateDateOrThrow(checkIn, 'checkIn');
+        const validCheckOut = validateDateOrThrow(checkOut, 'checkOut');
 
         const data = loadBookings();
         const prices = loadPrices();
@@ -378,7 +573,9 @@ app.post('/api/check-availability', (req, res) => {
         const checkOutDate = new Date(validCheckOut);
 
         const closedDate = hasClosedDates(validCheckIn, validCheckOut, 'room', prices);
-        if (closedDate) return res.json({ available: false, reason: `Дата закрыта для бронирования: ${formatRuDate(closedDate)}` });
+        if (closedDate) {
+            return res.json({ available: false, reason: `Дата закрыта для бронирования: ${formatRuDate(closedDate)}` });
+        }
 
         let isAvailable = true;
         for (const booking of data.bookings) {
@@ -391,87 +588,25 @@ app.post('/api/check-availability', (req, res) => {
                         break;
                     }
                 } catch (error) {
-                    console.error('Ошибка обработки даты бронирования:', error, booking);
+                    console.error('Ошибка проверки доступности:', error, booking);
                 }
             }
         }
         res.json({ available: isAvailable });
     } catch (error) {
+        console.error('❌ /api/check-availability error:', error);
         return res.status(400).json({ error: error.message });
     }
 });
 
-// Отправка в Telegram
-async function sendTelegramNotification(booking) {
-    const botToken = process.env.TG_BOT_TOKEN;
-    const chatId = process.env.TG_CHAT_ID;
-
-    if (!botToken || botToken.includes('ВАШ') || botToken === '7310946404:AAHdJoQk4_kX2jjZR9K-UxINXZ7zMUq-rpU') {
-        console.log('⚠️ Telegram не настроен. Укажите свой TG_BOT_TOKEN в .env');
-        return;
-    }
-
-    const typeIcon = booking.type === 'tour' ? '✈️' : '🏨';
-    const typeText = booking.type === 'tour' ? 'БРОНИРОВАНИЕ ТУРА' : 'БРОНИРОВАНИЕ НОМЕРА';
-
-    const message = `${typeIcon} НОВОЕ ${typeText} ${typeIcon}
-
-👤 Гость: ${booking.guestName}
-📞 Телефон: ${booking.guestPhone}
-📱 Telegram: ${booking.guestTelegram || 'не указан'}
-📧 Email: ${booking.guestEmail || 'не указан'}
-
-${booking.type === 'tour' ? `🎯 Тур: ${booking.tourName}` : `🛏 Номер: ${booking.roomName}`}
-👥 Гостей: ${booking.guestsCount}
-
-📅 ${booking.type === 'tour' ? 'Дата тура' : 'Заезд'}: ${formatRuDate(booking.checkIn)}${booking.type === 'tour' && booking.checkOut === booking.checkIn ? '' : `
-📅 ${booking.type === 'tour' ? 'Окончание' : 'Выезд'}: ${formatRuDate(booking.checkOut)}`}
-💰 Стоимость: ${booking.totalPrice}₾
-
-📝 Пожелания: ${booking.notes || 'нет'}`;
-
-    try {
-        const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, text: message })
-        });
-        const result = await response.json();
-        if (result.ok) {
-            console.log('✅ Уведомление в Telegram отправлено');
-        } else {
-            console.log('❌ Ошибка Telegram:', result);
-        }
-    } catch (error) {
-        console.error('❌ Ошибка отправки в Telegram:', error.message);
-    }
-}
-
-function calculateBookingPrice({ type, roomId, tourId, tourName, checkIn, checkOut, clientTotal, prices }) {
-    try {
-        const validCheckIn = validateDate(checkIn);
-        const validCheckOut = validateDate(checkOut);
-
-        if ((type || 'room') === 'tour') {
-            return getTourDatePrice(tourId, tourName, validCheckIn, prices) || Number(clientTotal || 0);
-        }
-        const nights = dateRange(validCheckIn, validCheckOut, false);
-        const total = nights.reduce((sum, dateStr) => sum + getRoomNightPrice(roomId, dateStr, prices), 0);
-        return total || Number(clientTotal || 0);
-    } catch (error) {
-        console.error('Ошибка расчета цены:', error);
-        return Number(clientTotal || 0);
-    }
-}
-
-// Создать бронирование
 app.post('/api/bookings', async (req, res) => {
     try {
         const { type, roomId, roomName, tourId, tourName, guestName, guestPhone, guestTelegram, guestEmail, guestsCount, checkIn, checkOut, totalPrice, notes } = req.body;
 
-        // Валидируем даты
-        const validCheckIn = validateDate(checkIn);
-        const validCheckOut = validateDate(checkOut);
+        console.log('📥 /api/bookings:', { type, roomId, checkIn, checkOut, guestName });
+
+        const validCheckIn = validateDateOrThrow(checkIn, 'checkIn');
+        const validCheckOut = validateDateOrThrow(checkOut, 'checkOut');
 
         const data = loadBookings();
         const prices = loadPrices();
@@ -482,7 +617,6 @@ app.post('/api/bookings', async (req, res) => {
             return res.status(400).json({ error: `Бронирование закрыто на дату ${formatRuDate(closedDate)}` });
         }
 
-        // Проверка доступности только для номеров
         if (type !== 'tour') {
             let isAvailable = true;
             for (const booking of data.bookings) {
@@ -515,7 +649,7 @@ app.post('/api/bookings', async (req, res) => {
             guestPhone,
             guestTelegram: guestTelegram || '',
             guestEmail: guestEmail || '',
-            guestsCount,
+            guestsCount: guestsCount || 1,
             checkIn: validCheckIn,
             checkOut: validCheckOut,
             totalPrice: calculateBookingPrice({ type, roomId, tourId, tourName, checkIn: validCheckIn, checkOut: validCheckOut, guestsCount, clientTotal: totalPrice, prices }),
@@ -526,12 +660,11 @@ app.post('/api/bookings', async (req, res) => {
 
         data.bookings.push(newBooking);
         await saveBookings(data);
-
-        // Отправляем уведомление в Telegram
         await sendTelegramNotification(newBooking);
 
         res.json({ success: true, booking: newBooking });
     } catch (error) {
+        console.error('❌ /api/bookings error:', error);
         return res.status(400).json({ error: error.message });
     }
 });
@@ -586,7 +719,6 @@ app.post('/api/admin/cancel', async (req, res) => {
     }
 });
 
-
 app.post('/api/admin/calendar', async (req, res) => {
     if (!requireAdmin(req, res)) return;
 
@@ -616,7 +748,6 @@ app.post('/api/admin/calendar', async (req, res) => {
     });
     res.json({ days });
 });
-
 
 app.post('/api/admin/admins/create', async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -648,14 +779,12 @@ app.post('/api/admin/stats', async (req, res) => {
     res.json({ total, active, cancelled: total - active, revenue, monthRevenue, futureRevenue, avgBooking });
 });
 
-
 app.post('/api/admin/move-booking', async (req, res) => {
     const { bookingId, newCheckIn } = req.body;
     if (!requireAdmin(req, res)) return;
 
     try {
-        // Валидируем дату
-        const validNewCheckIn = validateDate(newCheckIn);
+        const validNewCheckIn = validateDateOrThrow(newCheckIn, 'newCheckIn');
 
         const data = loadBookings();
         const prices = loadPrices();
@@ -677,7 +806,9 @@ app.post('/api/admin/move-booking', async (req, res) => {
         const newOutStr = newOut.toISOString().split('T')[0];
 
         const closedDate = hasClosedDates(validNewCheckIn, newOutStr, booking.type || 'room', prices);
-        if (closedDate) return res.status(400).json({ error: `Дата закрыта: ${formatRuDate(closedDate)}` });
+        if (closedDate) {
+            return res.status(400).json({ error: `Дата закрыта: ${formatRuDate(closedDate)}` });
+        }
 
         if ((booking.type || 'room') !== 'tour') {
             for (const other of data.bookings) {
@@ -699,10 +830,58 @@ app.post('/api/admin/move-booking', async (req, res) => {
         await saveBookings(data);
         res.json({ success: true, booking });
     } catch (error) {
+        console.error('❌ /api/admin/move-booking error:', error);
         return res.status(400).json({ error: error.message });
     }
 });
 
+// ========== TELEGRAM ==========
+async function sendTelegramNotification(booking) {
+    const botToken = process.env.TG_BOT_TOKEN;
+    const chatId = process.env.TG_CHAT_ID;
+
+    if (!botToken || botToken.includes('ВАШ') || botToken === '7310946404:AAHdJoQk4_kX2jjZR9K-UxINXZ7zMUq-rpU') {
+        console.log('⚠️ Telegram не настроен. Укажите свой TG_BOT_TOKEN в .env');
+        return;
+    }
+
+    const typeIcon = booking.type === 'tour' ? '✈️' : '🏨';
+    const typeText = booking.type === 'tour' ? 'БРОНИРОВАНИЕ ТУРА' : 'БРОНИРОВАНИЕ НОМЕРА';
+
+    const message = `${typeIcon} НОВОЕ ${typeText} ${typeIcon}
+
+👤 Гость: ${booking.guestName}
+📞 Телефон: ${booking.guestPhone}
+📱 Telegram: ${booking.guestTelegram || 'не указан'}
+📧 Email: ${booking.guestEmail || 'не указан'}
+
+${booking.type === 'tour' ? `🎯 Тур: ${booking.tourName}` : `🛏 Номер: ${booking.roomName}`}
+👥 Гостей: ${booking.guestsCount}
+
+📅 ${booking.type === 'tour' ? 'Дата тура' : 'Заезд'}: ${formatRuDate(booking.checkIn)}${booking.type === 'tour' && booking.checkOut === booking.checkIn ? '' : `
+📅 ${booking.type === 'tour' ? 'Окончание' : 'Выезд'}: ${formatRuDate(booking.checkOut)}`}
+💰 Стоимость: ${booking.totalPrice}₾
+
+📝 Пожелания: ${booking.notes || 'нет'}`;
+
+    try {
+        const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: message })
+        });
+        const result = await response.json();
+        if (result.ok) {
+            console.log('✅ Уведомление в Telegram отправлено');
+        } else {
+            console.log('❌ Ошибка Telegram:', result);
+        }
+    } catch (error) {
+        console.error('❌ Ошибка отправки в Telegram:', error.message);
+    }
+}
+
+// ========== PDF ==========
 function getPdfFontPath() {
     const candidates = [
         process.env.PDF_FONT_PATH,
@@ -720,7 +899,9 @@ function getPdfFontPath() {
 }
 
 app.get('/api/admin/receipt/:id.pdf', (req, res) => {
-    if (!isAdminAuthorized({ username: req.query.username, password: req.query.password })) return res.status(401).send('Неверный логин или пароль');
+    if (!isAdminAuthorized({ username: req.query.username, password: req.query.password })) {
+        return res.status(401).send('Неверный логин или пароль');
+    }
     const data = loadBookings();
     const booking = data.bookings.find(b => String(b.id) === String(req.params.id));
     if (!booking) return res.status(404).send('Бронирование не найдено');
@@ -762,7 +943,6 @@ app.get('/api/admin/receipt/:id.pdf', (req, res) => {
 
     doc.end();
 });
-
 
 // ========== TELEGRAM BOT ==========
 let tgOffset = 0;
@@ -976,6 +1156,7 @@ async function handleTelegramMessage(message) {
         const items = Object.entries(prices.closedDates || {}).sort(([a], [b]) => a.localeCompare(b));
         await tgSend(chatId, items.length ? items.map(([date, info]) => `🚫 ${formatRuDate(date)} — ${info.reason || 'закрыто'}`).join('\n') : 'Закрытых дат нет.', keyboard);
     } else if (text === '/uploadgallery') {
+        const state = loadTgState();
         state[chatId] = { kind: 'gallery' };
         await saveTgState(state);
         await tgSend(chatId, 'Пришлите фото следующим сообщением — я добавлю его в главные фото сайта.', keyboard);
@@ -986,6 +1167,7 @@ async function handleTelegramMessage(message) {
             await tgSend(chatId, 'Формат: /uploadroomphoto 1', keyboard);
             return;
         }
+        const state = loadTgState();
         state[chatId] = { kind: 'room', id };
         await saveTgState(state);
         await tgSend(chatId, `Пришлите фото следующим сообщением — я сохраню его для номера №${id}.`, keyboard);
@@ -996,6 +1178,7 @@ async function handleTelegramMessage(message) {
             await tgSend(chatId, 'Формат: /uploadtourphoto 2', keyboard);
             return;
         }
+        const state = loadTgState();
         state[chatId] = { kind: 'tour', id };
         await saveTgState(state);
         await tgSend(chatId, `Пришлите фото следующим сообщением — я сохраню его для тура №${id}.`, keyboard);
@@ -1027,6 +1210,37 @@ async function pollTelegram() {
     }
 }
 
+async function saveTelegramPhoto(message, target) {
+    const botToken = process.env.TG_BOT_TOKEN;
+    const photos = message.photo || [];
+    if (!photos.length) throw new Error('Фото не найдено');
+    const best = photos[photos.length - 1];
+    const fileInfoRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${best.file_id}`);
+    const fileInfo = await fileInfoRes.json();
+    if (!fileInfo.ok || !fileInfo.result?.file_path) throw new Error('Не удалось получить файл из Telegram');
+    const ext = path.extname(fileInfo.result.file_path) || '.jpg';
+    let dir;
+    let fileName;
+    const stamp = Date.now();
+    if (target.kind === 'room') {
+        dir = path.join(PUBLIC_DIR, 'images', 'rooms');
+        fileName = `room-${target.id}-tg-${stamp}${ext}`;
+    } else if (target.kind === 'tour') {
+        dir = path.join(PUBLIC_DIR, 'images', 'tours');
+        fileName = `tour-${target.id}-tg-${stamp}${ext}`;
+    } else {
+        dir = path.join(PUBLIC_DIR, 'images', 'mainimg');
+        fileName = `mainimg-tg-${stamp}${ext}`;
+    }
+    ensureDir(dir);
+    const fileRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${fileInfo.result.file_path}`);
+    const buffer = await fileRes.buffer();
+    const outputPath = path.join(dir, fileName);
+    fs.writeFileSync(outputPath, buffer);
+    return path.relative(PUBLIC_DIR, outputPath).replace(/\\/g, '/');
+}
+
+// ========== ЗАПУСК ==========
 initData().then(() => {
     app.listen(PORT, () => {
         console.log(`\n🚀 Сервер запущен!`);
@@ -1038,5 +1252,4 @@ initData().then(() => {
 }).catch(error => {
     console.error('❌ Ошибка инициализации Supabase:', error);
     process.exit(1);
-
 });
