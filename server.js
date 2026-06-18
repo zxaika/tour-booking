@@ -39,6 +39,45 @@ function clone(value) {
     return JSON.parse(JSON.stringify(value));
 }
 
+// ========== ФУНКЦИЯ ВАЛИДАЦИИ ДАТ ==========
+function validateDate(dateStr) {
+    if (!dateStr) return null;
+    const str = String(dateStr).trim();
+    // Проверяем формат YYYY-MM-DD
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+        throw new Error(`Invalid date format: "${str}". Expected YYYY-MM-DD`);
+    }
+    // Проверяем, что дата существует
+    const [year, month, day] = str.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+        throw new Error(`Invalid date: "${str}" does not exist`);
+    }
+    return str;
+}
+
+// ========== ФУНКЦИЯ ДЛЯ РАБОТЫ С ДАТАМИ ==========
+function dateRange(startDate, endDate, inclusive = false) {
+    const dates = [];
+    const current = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (inclusive) end.setDate(end.getDate() + 1);
+
+    while (current < end) {
+        const dateStr = current.toISOString().split('T')[0];
+        dates.push(dateStr);
+        current.setDate(current.getDate() + 1);
+    }
+    return dates;
+}
+
+function formatRuDate(dateStr) {
+    if (!dateStr) return '';
+    const [year, month, day] = String(dateStr).split('-').map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString('ru-RU');
+}
+
 const DEFAULT_PRICES = {
     rooms: {
         1: { name: 'Номер №1', price: 120 },
@@ -154,19 +193,35 @@ function loadBookings() {
 
 async function saveBookings(data) {
     bookingsCache = clone(data);
-    const rows = (data.bookings || []).map(booking => ({
-        id: Number(booking.id),
-        type: booking.type || 'room',
-        status: booking.status || 'confirmed',
-        check_in: booking.checkIn || null,
-        check_out: booking.checkOut || null,
-        created_at: booking.createdAt || new Date().toISOString(),
-        data: booking
-    }));
-    const { error: deleteError } = await supabase.from('bookings').delete().neq('id', 0);
+    // Используем upsert вместо delete + insert для избежания проблем с типами
+    const rows = (data.bookings || []).map(booking => {
+        // Валидируем даты перед сохранением
+        const checkIn = booking.checkIn ? validateDate(booking.checkIn) : null;
+        const checkOut = booking.checkOut ? validateDate(booking.checkOut) : null;
+
+        return {
+            id: Number(booking.id),
+            type: booking.type || 'room',
+            status: booking.status || 'confirmed',
+            check_in: checkIn,
+            check_out: checkOut,
+            created_at: booking.createdAt || new Date().toISOString(),
+            data: { ...booking, checkIn, checkOut } // сохраняем валидные даты
+        };
+    });
+
+    // Удаляем все старые записи
+    const { error: deleteError } = await supabase
+        .from('bookings')
+        .delete()
+        .neq('id', 0);
     if (deleteError) throw deleteError;
+
+    // Вставляем новые записи, только если они есть
     if (rows.length) {
-        const { error: insertError } = await supabase.from('bookings').insert(rows);
+        const { error: insertError } = await supabase
+            .from('bookings')
+            .insert(rows);
         if (insertError) throw insertError;
     }
 }
@@ -230,32 +285,49 @@ app.get('/api/tour-media', (req, res) => {
 });
 
 app.get('/api/available-rooms', (req, res) => {
-    const { checkIn, checkOut } = req.query;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(checkIn || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(checkOut || ''))) {
-        return res.status(400).json({ error: 'Укажите даты checkIn и checkOut в формате YYYY-MM-DD' });
+    try {
+        const { checkIn, checkOut } = req.query;
+
+        // Валидируем даты
+        const validCheckIn = validateDate(checkIn);
+        const validCheckOut = validateDate(checkOut);
+
+        if (new Date(validCheckOut) <= new Date(validCheckIn)) {
+            return res.status(400).json({ error: 'Дата выезда должна быть позже даты заезда' });
+        }
+
+        const prices = loadPrices();
+        const nights = dateRange(validCheckIn, validCheckOut, false).length;
+        const rooms = Object.entries(prices.rooms).filter(([id]) => isRoomAvailable(id, validCheckIn, validCheckOut)).map(([id, room]) => ({
+            id: Number(id),
+            name: room.name,
+            price: room.price,
+            total: calculateBookingPrice({ type: 'room', roomId: id, checkIn: validCheckIn, checkOut: validCheckOut, prices })
+        }));
+        res.json({ checkIn: validCheckIn, checkOut: validCheckOut, nights, rooms });
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
     }
-    if (new Date(checkOut) <= new Date(checkIn)) {
-        return res.status(400).json({ error: 'Дата выезда должна быть позже даты заезда' });
-    }
-    const prices = loadPrices();
-    const nights = dateRange(checkIn, checkOut, false).length;
-    const rooms = Object.entries(prices.rooms).filter(([id]) => isRoomAvailable(id, checkIn, checkOut)).map(([id, room]) => ({
-        id: Number(id),
-        name: room.name,
-        price: room.price,
-        total: calculateBookingPrice({ type: 'room', roomId: id, checkIn, checkOut, prices })
-    }));
-    res.json({ checkIn, checkOut, nights, rooms });
 });
 
 // Получить правила цен и закрытые даты
 app.post('/api/quote', (req, res) => {
-    const { type, roomId, tourId, tourName, checkIn, checkOut } = req.body;
-    const prices = loadPrices();
-    const closedDate = hasClosedDates(checkIn, checkOut, type || 'room', prices);
-    if (closedDate) return res.status(400).json({ error: `Бронирование закрыто на дату ${formatRuDate(closedDate)}` });
-    const total = calculateBookingPrice({ type, roomId, tourId, tourName, checkIn, checkOut, prices });
-    res.json({ total });
+    try {
+        const { type, roomId, tourId, tourName, checkIn, checkOut } = req.body;
+
+        // Валидируем даты
+        const validCheckIn = validateDate(checkIn);
+        const validCheckOut = validateDate(checkOut);
+
+        const prices = loadPrices();
+        const closedDate = hasClosedDates(validCheckIn, validCheckOut, type || 'room', prices);
+        if (closedDate) return res.status(400).json({ error: `Бронирование закрыто на дату ${formatRuDate(closedDate)}` });
+
+        const total = calculateBookingPrice({ type, roomId, tourId, tourName, checkIn: validCheckIn, checkOut: validCheckOut, prices });
+        res.json({ total });
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
+    }
 });
 
 // Получить занятые даты для номеров
@@ -267,14 +339,20 @@ app.get('/api/booked-dates', (req, res) => {
         if (booking.status === 'cancelled' || booking.type === 'tour') return;
         if (!bookedDates[booking.roomId]) bookedDates[booking.roomId] = [];
 
-        let start = new Date(booking.checkIn);
-        let end = new Date(booking.checkOut);
-        while (start < end) {
-            const dateStr = start.toISOString().split('T')[0];
-            bookedDates[booking.roomId].push(dateStr);
-            start.setDate(start.getDate() + 1);
+        try {
+            const start = new Date(validateDate(booking.checkIn));
+            const end = new Date(validateDate(booking.checkOut));
+
+            while (start < end) {
+                const dateStr = start.toISOString().split('T')[0];
+                bookedDates[booking.roomId].push(dateStr);
+                start.setDate(start.getDate() + 1);
+            }
+        } catch (error) {
+            console.error('Ошибка обработки даты бронирования:', error, booking);
         }
     });
+
     const prices = loadPrices();
     Object.keys(prices.closedDates || {}).forEach(dateStr => {
         for (const roomId of Object.keys(prices.rooms || {})) {
@@ -287,27 +365,40 @@ app.get('/api/booked-dates', (req, res) => {
 
 // Проверить доступность номера
 app.post('/api/check-availability', (req, res) => {
-    const { roomId, checkIn, checkOut } = req.body;
-    const data = loadBookings();
-    const prices = loadPrices();
-    const checkInDate = new Date(checkIn);
-    const checkOutDate = new Date(checkOut);
+    try {
+        const { roomId, checkIn, checkOut } = req.body;
 
-    const closedDate = hasClosedDates(checkIn, checkOut, 'room', prices);
-    if (closedDate) return res.json({ available: false, reason: `Дата закрыта для бронирования: ${formatRuDate(closedDate)}` });
+        // Валидируем даты
+        const validCheckIn = validateDate(checkIn);
+        const validCheckOut = validateDate(checkOut);
 
-    let isAvailable = true;
-    for (const booking of data.bookings) {
-        if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
-            const bookingIn = new Date(booking.checkIn);
-            const bookingOut = new Date(booking.checkOut);
-            if (!(checkOutDate <= bookingIn || checkInDate >= bookingOut)) {
-                isAvailable = false;
-                break;
+        const data = loadBookings();
+        const prices = loadPrices();
+        const checkInDate = new Date(validCheckIn);
+        const checkOutDate = new Date(validCheckOut);
+
+        const closedDate = hasClosedDates(validCheckIn, validCheckOut, 'room', prices);
+        if (closedDate) return res.json({ available: false, reason: `Дата закрыта для бронирования: ${formatRuDate(closedDate)}` });
+
+        let isAvailable = true;
+        for (const booking of data.bookings) {
+            if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
+                try {
+                    const bookingIn = new Date(validateDate(booking.checkIn));
+                    const bookingOut = new Date(validateDate(booking.checkOut));
+                    if (!(checkOutDate <= bookingIn || checkInDate >= bookingOut)) {
+                        isAvailable = false;
+                        break;
+                    }
+                } catch (error) {
+                    console.error('Ошибка обработки даты бронирования:', error, booking);
+                }
             }
         }
+        res.json({ available: isAvailable });
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
     }
-    res.json({ available: isAvailable });
 });
 
 // Отправка в Telegram
@@ -319,11 +410,6 @@ async function sendTelegramNotification(booking) {
         console.log('⚠️ Telegram не настроен. Укажите свой TG_BOT_TOKEN в .env');
         return;
     }
-
-    const formatDate = (d) => {
-        const [year, month, day] = String(d).split('-').map(Number);
-        return new Date(year, month - 1, day).toLocaleDateString('ru-RU');
-    };
 
     const typeIcon = booking.type === 'tour' ? '✈️' : '🏨';
     const typeText = booking.type === 'tour' ? 'БРОНИРОВАНИЕ ТУРА' : 'БРОНИРОВАНИЕ НОМЕРА';
@@ -338,8 +424,8 @@ async function sendTelegramNotification(booking) {
 ${booking.type === 'tour' ? `🎯 Тур: ${booking.tourName}` : `🛏 Номер: ${booking.roomName}`}
 👥 Гостей: ${booking.guestsCount}
 
-📅 ${booking.type === 'tour' ? 'Дата тура' : 'Заезд'}: ${formatDate(booking.checkIn)}${booking.type === 'tour' && booking.checkOut === booking.checkIn ? '' : `
-📅 ${booking.type === 'tour' ? 'Окончание' : 'Выезд'}: ${formatDate(booking.checkOut)}`}
+📅 ${booking.type === 'tour' ? 'Дата тура' : 'Заезд'}: ${formatRuDate(booking.checkIn)}${booking.type === 'tour' && booking.checkOut === booking.checkIn ? '' : `
+📅 ${booking.type === 'tour' ? 'Окончание' : 'Выезд'}: ${formatRuDate(booking.checkOut)}`}
 💰 Стоимость: ${booking.totalPrice}₾
 
 📝 Пожелания: ${booking.notes || 'нет'}`;
@@ -362,72 +448,92 @@ ${booking.type === 'tour' ? `🎯 Тур: ${booking.tourName}` : `🛏 Номе�
 }
 
 function calculateBookingPrice({ type, roomId, tourId, tourName, checkIn, checkOut, clientTotal, prices }) {
-    if ((type || 'room') === 'tour') {
-        return getTourDatePrice(tourId, tourName, checkIn, prices) || Number(clientTotal || 0);
+    try {
+        const validCheckIn = validateDate(checkIn);
+        const validCheckOut = validateDate(checkOut);
+
+        if ((type || 'room') === 'tour') {
+            return getTourDatePrice(tourId, tourName, validCheckIn, prices) || Number(clientTotal || 0);
+        }
+        const nights = dateRange(validCheckIn, validCheckOut, false);
+        const total = nights.reduce((sum, dateStr) => sum + getRoomNightPrice(roomId, dateStr, prices), 0);
+        return total || Number(clientTotal || 0);
+    } catch (error) {
+        console.error('Ошибка расчета цены:', error);
+        return Number(clientTotal || 0);
     }
-    const nights = dateRange(checkIn, checkOut, false);
-    const total = nights.reduce((sum, dateStr) => sum + getRoomNightPrice(roomId, dateStr, prices), 0);
-    return total || Number(clientTotal || 0);
 }
 
 // Создать бронирование
 app.post('/api/bookings', async (req, res) => {
-    const { type, roomId, roomName, tourId, tourName, guestName, guestPhone, guestTelegram, guestEmail, guestsCount, checkIn, checkOut, totalPrice, notes } = req.body;
+    try {
+        const { type, roomId, roomName, tourId, tourName, guestName, guestPhone, guestTelegram, guestEmail, guestsCount, checkIn, checkOut, totalPrice, notes } = req.body;
 
-    const data = loadBookings();
-    const prices = loadPrices();
-    const checkInDate = new Date(checkIn);
-    const checkOutDate = new Date(checkOut);
-    const closedDate = hasClosedDates(checkIn, checkOut, type || 'room', prices);
-    if (closedDate) {
-        return res.status(400).json({ error: `Бронирование закрыто на дату ${formatRuDate(closedDate)}` });
-    }
+        // Валидируем даты
+        const validCheckIn = validateDate(checkIn);
+        const validCheckOut = validateDate(checkOut);
 
-    // Проверка доступности только для номеров
-    if (type !== 'tour') {
-        let isAvailable = true;
-        for (const booking of data.bookings) {
-            if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
-                const bookingIn = new Date(booking.checkIn);
-                const bookingOut = new Date(booking.checkOut);
-                if (!(checkOutDate <= bookingIn || checkInDate >= bookingOut)) {
-                    isAvailable = false;
-                    break;
+        const data = loadBookings();
+        const prices = loadPrices();
+        const checkInDate = new Date(validCheckIn);
+        const checkOutDate = new Date(validCheckOut);
+        const closedDate = hasClosedDates(validCheckIn, validCheckOut, type || 'room', prices);
+        if (closedDate) {
+            return res.status(400).json({ error: `Бронирование закрыто на дату ${formatRuDate(closedDate)}` });
+        }
+
+        // Проверка доступности только для номеров
+        if (type !== 'tour') {
+            let isAvailable = true;
+            for (const booking of data.bookings) {
+                if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
+                    try {
+                        const bookingIn = new Date(validateDate(booking.checkIn));
+                        const bookingOut = new Date(validateDate(booking.checkOut));
+                        if (!(checkOutDate <= bookingIn || checkInDate >= bookingOut)) {
+                            isAvailable = false;
+                            break;
+                        }
+                    } catch (error) {
+                        console.error('Ошибка проверки доступности:', error, booking);
+                    }
                 }
             }
+            if (!isAvailable) {
+                return res.status(400).json({ error: 'Номер уже забронирован на выбранные даты' });
+            }
         }
-        if (!isAvailable) {
-            return res.status(400).json({ error: 'Номер уже забронирован на выбранные даты' });
-        }
+
+        const newBooking = {
+            id: Date.now(),
+            type: type || 'room',
+            roomId: roomId || null,
+            roomName: roomName || null,
+            tourId: tourId || null,
+            tourName: tourName || null,
+            guestName,
+            guestPhone,
+            guestTelegram: guestTelegram || '',
+            guestEmail: guestEmail || '',
+            guestsCount,
+            checkIn: validCheckIn,
+            checkOut: validCheckOut,
+            totalPrice: calculateBookingPrice({ type, roomId, tourId, tourName, checkIn: validCheckIn, checkOut: validCheckOut, guestsCount, clientTotal: totalPrice, prices }),
+            status: 'confirmed',
+            notes: notes || '',
+            createdAt: new Date().toISOString()
+        };
+
+        data.bookings.push(newBooking);
+        await saveBookings(data);
+
+        // Отправляем уведомление в Telegram
+        await sendTelegramNotification(newBooking);
+
+        res.json({ success: true, booking: newBooking });
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
     }
-
-    const newBooking = {
-        id: Date.now(),
-        type: type || 'room',
-        roomId: roomId || null,
-        roomName: roomName || null,
-        tourId: tourId || null,
-        tourName: tourName || null,
-        guestName,
-        guestPhone,
-        guestTelegram: guestTelegram || '',
-        guestEmail: guestEmail || '',
-        guestsCount,
-        checkIn,
-        checkOut,
-        totalPrice: calculateBookingPrice({ type, roomId, tourId, tourName, checkIn, checkOut, guestsCount, clientTotal: totalPrice, prices }),
-        status: 'confirmed',
-        notes: notes || '',
-        createdAt: new Date().toISOString()
-    };
-
-    data.bookings.push(newBooking);
-    await saveBookings(data);
-
-    // Отправляем уведомление в Telegram
-    await sendTelegramNotification(newBooking);
-
-    res.json({ success: true, booking: newBooking });
 });
 
 // ========== АДМИН API ==========
@@ -546,46 +652,58 @@ app.post('/api/admin/stats', async (req, res) => {
 app.post('/api/admin/move-booking', async (req, res) => {
     const { bookingId, newCheckIn } = req.body;
     if (!requireAdmin(req, res)) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(newCheckIn || '')) return res.status(400).json({ error: 'Неверная дата' });
-    const data = loadBookings();
-    const prices = loadPrices();
-    const booking = data.bookings.find(b => String(b.id) === String(bookingId));
-    if (!booking) return res.status(404).json({ error: 'Бронирование не найдено' });
 
-    const oldIn = new Date(booking.checkIn);
-    const oldOut = new Date(booking.checkOut || booking.checkIn);
-    const newIn = new Date(newCheckIn);
-    const newOut = new Date(newIn);
-    if ((booking.type || 'room') === 'tour') {
-        const days = Math.max(1, Math.round((oldOut - oldIn) / 86400000) + 1);
-        newOut.setDate(newOut.getDate() + days - 1);
-    } else {
-        const nights = Math.max(1, Math.round((oldOut - oldIn) / 86400000));
-        newOut.setDate(newOut.getDate() + nights);
-    }
-    const newOutStr = newOut.toISOString().split('T')[0];
-    const closedDate = hasClosedDates(newCheckIn, newOutStr, booking.type || 'room', prices);
-    if (closedDate) return res.status(400).json({ error: `Дата закрыта: ${formatRuDate(closedDate)}` });
+    try {
+        // Валидируем дату
+        const validNewCheckIn = validateDate(newCheckIn);
 
-    if ((booking.type || 'room') !== 'tour') {
-        for (const other of data.bookings) {
-            if (String(other.id) === String(booking.id) || other.status === 'cancelled' || other.type === 'tour' || String(other.roomId) !== String(booking.roomId)) continue;
-            if (!(newOut <= new Date(other.checkIn) || newIn >= new Date(other.checkOut))) {
-                return res.status(400).json({ error: 'На новую дату номер уже занят' });
+        const data = loadBookings();
+        const prices = loadPrices();
+        const booking = data.bookings.find(b => String(b.id) === String(bookingId));
+        if (!booking) return res.status(404).json({ error: 'Бронирование не найдено' });
+
+        const oldIn = new Date(validateDate(booking.checkIn));
+        const oldOut = new Date(validateDate(booking.checkOut || booking.checkIn));
+        const newIn = new Date(validNewCheckIn);
+        const newOut = new Date(newIn);
+
+        if ((booking.type || 'room') === 'tour') {
+            const days = Math.max(1, Math.round((oldOut - oldIn) / 86400000) + 1);
+            newOut.setDate(newOut.getDate() + days - 1);
+        } else {
+            const nights = Math.max(1, Math.round((oldOut - oldIn) / 86400000));
+            newOut.setDate(newOut.getDate() + nights);
+        }
+        const newOutStr = newOut.toISOString().split('T')[0];
+
+        const closedDate = hasClosedDates(validNewCheckIn, newOutStr, booking.type || 'room', prices);
+        if (closedDate) return res.status(400).json({ error: `Дата закрыта: ${formatRuDate(closedDate)}` });
+
+        if ((booking.type || 'room') !== 'tour') {
+            for (const other of data.bookings) {
+                if (String(other.id) === String(booking.id) || other.status === 'cancelled' || other.type === 'tour' || String(other.roomId) !== String(booking.roomId)) continue;
+                try {
+                    const otherIn = new Date(validateDate(other.checkIn));
+                    const otherOut = new Date(validateDate(other.checkOut));
+                    if (!(newOut <= otherIn || newIn >= otherOut)) {
+                        return res.status(400).json({ error: 'На новую дату номер уже занят' });
+                    }
+                } catch (error) {
+                    console.error('Ошибка проверки даты:', error);
+                }
             }
         }
+        booking.checkIn = validNewCheckIn;
+        booking.checkOut = newOutStr;
+        booking.totalPrice = calculateBookingPrice({ type: booking.type, roomId: booking.roomId, tourId: booking.tourId, tourName: booking.tourName, checkIn: booking.checkIn, checkOut: booking.checkOut, prices });
+        await saveBookings(data);
+        res.json({ success: true, booking });
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
     }
-    booking.checkIn = newCheckIn;
-    booking.checkOut = newOutStr;
-    booking.totalPrice = calculateBookingPrice({ type: booking.type, roomId: booking.roomId, tourId: booking.tourId, tourName: booking.tourName, checkIn: booking.checkIn, checkOut: booking.checkOut, prices });
-    await saveBookings(data);
-    res.json({ success: true, booking });
 });
 
 function getPdfFontPath() {
-    // PDFKit стандартными шрифтами не показывает кириллицу.
-    // Поэтому ищем системный TTF/OTF-шрифт с Unicode: на VPS обычно есть DejaVu или Noto.
-    // При необходимости можно указать путь вручную в .env: PDF_FONT_PATH=/path/to/DejaVuSans.ttf
     const candidates = [
         process.env.PDF_FONT_PATH,
         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
@@ -600,6 +718,7 @@ function getPdfFontPath() {
     ].filter(Boolean);
     return candidates.find(file => fs.existsSync(file));
 }
+
 app.get('/api/admin/receipt/:id.pdf', (req, res) => {
     if (!isAdminAuthorized({ username: req.query.username, password: req.query.password })) return res.status(401).send('Неверный логин или пароль');
     const data = loadBookings();
@@ -627,25 +746,25 @@ app.get('/api/admin/receipt/:id.pdf', (req, res) => {
     doc.fontSize(20).text('Meskhi House — чек бронирования');
     doc.moveDown();
     doc.fontSize(12)
-      .text(`Номер бронирования: ${booking.id}`)
-      .text(`Гость: ${booking.guestName || '-'}`)
-      .text(`Телефон: ${booking.guestPhone || '-'}`)
-      .text(`Telegram: ${booking.guestTelegram || '-'}`)
-      .text(`Email: ${booking.guestEmail || '-'}`)
-      .text(`Тип: ${typeLabel}`)
-      .text(`Объект: ${itemName || '-'}`)
-      .text(`Даты: ${booking.checkIn} — ${booking.checkOut}`)
-      .text(`Гостей: ${booking.guestsCount || '-'}`)
-      .text(`Итого: ${booking.totalPrice || 0} ₾`)
-      .text(`Статус: ${statusLabel}`)
-      .moveDown()
-      .text('Спасибо! Чек сформирован автоматически.');
+        .text(`Номер бронирования: ${booking.id}`)
+        .text(`Гость: ${booking.guestName || '-'}`)
+        .text(`Телефон: ${booking.guestPhone || '-'}`)
+        .text(`Telegram: ${booking.guestTelegram || '-'}`)
+        .text(`Email: ${booking.guestEmail || '-'}`)
+        .text(`Тип: ${typeLabel}`)
+        .text(`Объект: ${itemName || '-'}`)
+        .text(`Даты: ${booking.checkIn} — ${booking.checkOut}`)
+        .text(`Гостей: ${booking.guestsCount || '-'}`)
+        .text(`Итого: ${booking.totalPrice || 0} ₾`)
+        .text(`Статус: ${statusLabel}`)
+        .moveDown()
+        .text('Спасибо! Чек сформирован автоматически.');
 
     doc.end();
 });
 
 
-// ========== TELEGRAM BOT: просмотр туров и активных заявок ==========
+// ========== TELEGRAM BOT ==========
 let tgOffset = 0;
 
 function isTelegramConfigured() {
@@ -909,13 +1028,13 @@ async function pollTelegram() {
 }
 
 initData().then(() => {
-app.listen(PORT, () => {
-    console.log(`\n🚀 Сервер запущен!`);
-    console.log(`📍 Публичная страница: http://localhost:${PORT}`);
-    console.log(`🔐 Админ панель: http://localhost:${PORT}/admin.html`);
-    console.log(`🔑 Пароль админа: ${process.env.ADMIN_PASSWORD}\n`);
-    if (isTelegramConfigured()) setInterval(pollTelegram, 6000);
-});
+    app.listen(PORT, () => {
+        console.log(`\n🚀 Сервер запущен!`);
+        console.log(`📍 Публичная страница: http://localhost:${PORT}`);
+        console.log(`🔐 Админ панель: http://localhost:${PORT}/admin.html`);
+        console.log(`🔑 Пароль админа: ${process.env.ADMIN_PASSWORD}\n`);
+        if (isTelegramConfigured()) setInterval(pollTelegram, 6000);
+    });
 }).catch(error => {
     console.error('❌ Ошибка инициализации Supabase:', error);
     process.exit(1);
