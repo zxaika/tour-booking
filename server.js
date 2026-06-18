@@ -13,8 +13,37 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(express.static('public'));
+
+// ========== ЛОГИРОВАНИЕ ВСЕХ ЗАПРОСОВ ==========
+app.use((req, res, next) => {
+    console.log(`\n📥 [${new Date().toISOString()}] ${req.method} ${req.path}`);
+    if (req.method === 'POST' && req.body && Object.keys(req.body).length > 0) {
+        console.log('   Body:', JSON.stringify(req.body, null, 2));
+    }
+    if (req.method === 'GET' && req.query && Object.keys(req.query).length > 0) {
+        console.log('   Query:', JSON.stringify(req.query, null, 2));
+    }
+    next();
+});
+
+// ========== ПЕРЕХВАТ ОШИБОК ==========
+app.use((req, res, next) => {
+    const originalJson = res.json;
+    res.json = function(data) {
+        if (data && data.error && typeof data.error === 'string') {
+            console.error(`❌ Ошибка в ${req.method} ${req.path}:`, data.error);
+            if (data.error.includes('pattern') || data.error.includes('формат')) {
+                console.error('🔥 ПРОБЛЕМА С ДАТОЙ!');
+                console.error('📌 Тело запроса:', JSON.stringify(req.body, null, 2));
+                console.error('📌 Параметры:', JSON.stringify(req.query, null, 2));
+            }
+        }
+        return originalJson.call(this, data);
+    };
+    next();
+});
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
@@ -39,35 +68,64 @@ function clone(value) {
     return JSON.parse(JSON.stringify(value));
 }
 
-// ========== УСИЛЕННАЯ ВАЛИДАЦИЯ ДАТ ==========
-function validateDate(dateStr) {
-    if (!dateStr) return null;
-    const str = String(dateStr).trim();
+// ========== ФУНКЦИИ РАБОТЫ С ДАТАМИ ==========
+function toLocalDateString(date) {
+    if (!date) return null;
 
-    // Если это не строка - пытаемся преобразовать
-    if (typeof str !== 'string') {
-        console.error('❌ validateDate: received non-string:', str);
-        throw new Error(`Invalid date: expected string, got ${typeof str}`);
+    // Если это уже строка в формате YYYY-MM-DD
+    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return date;
     }
 
-    // Проверяем формат YYYY-MM-DD
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-        console.error(`❌ validateDate: invalid format "${str}"`);
-        throw new Error(`Invalid date format: "${str}". Expected YYYY-MM-DD`);
+    // Если это Date объект
+    if (date instanceof Date && !isNaN(date)) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+
+    // Пробуем распарсить
+    try {
+        const parsed = new Date(date);
+        if (!isNaN(parsed)) {
+            const y = parsed.getFullYear();
+            const m = String(parsed.getMonth() + 1).padStart(2, '0');
+            const d = String(parsed.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+    } catch (e) {}
+
+    // Если ничего не помогло, возвращаем как строку
+    return String(date);
+}
+
+function validateDate(dateStr) {
+    if (!dateStr) return null;
+
+    // Принудительно преобразуем в правильный формат
+    const result = toLocalDateString(dateStr);
+
+    // Проверяем, что получилось
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(result)) {
+        console.error(`❌ Неверный формат даты: "${dateStr}" -> "${result}"`);
+        throw new Error(`Invalid date format: "${dateStr}". Expected YYYY-MM-DD`);
     }
 
     // Проверяем, что дата существует
-    const [year, month, day] = str.split('-').map(Number);
-    const date = new Date(year, month - 1, day);
-    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-        console.error(`❌ validateDate: date doesn't exist "${str}"`);
-        throw new Error(`Invalid date: "${str}" does not exist`);
+    const [year, month, day] = result.split('-').map(Number);
+    const testDate = new Date(year, month - 1, day);
+    if (testDate.getFullYear() !== year || testDate.getMonth() !== month - 1 || testDate.getDate() !== day) {
+        throw new Error(`Invalid date: "${result}" does not exist`);
     }
 
-    return str;
+    return result;
 }
 
 function validateDateOrThrow(dateStr, fieldName = 'date') {
+    if (!dateStr) {
+        throw new Error(`Field "${fieldName}" is required`);
+    }
     try {
         return validateDate(dateStr);
     } catch (error) {
@@ -83,7 +141,7 @@ function dateRange(startDate, endDate, inclusive = false) {
     if (inclusive) end.setDate(end.getDate() + 1);
 
     while (current < end) {
-        const dateStr = current.toISOString().split('T')[0];
+        const dateStr = toLocalDateString(current);
         dates.push(dateStr);
         current.setDate(current.getDate() + 1);
     }
@@ -92,11 +150,13 @@ function dateRange(startDate, endDate, inclusive = false) {
 
 function formatRuDate(dateStr) {
     if (!dateStr) return '';
-    const [year, month, day] = String(dateStr).split('-').map(Number);
+    const str = String(dateStr);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const [year, month, day] = str.split('-').map(Number);
     return new Date(year, month - 1, day).toLocaleDateString('ru-RU');
 }
 
-// ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+// ========== ОСТАЛЬНЫЕ ФУНКЦИИ ==========
 function isRoomAvailable(roomId, checkIn, checkOut) {
     const data = loadBookings();
     const checkInDate = new Date(checkIn);
@@ -123,11 +183,9 @@ function getRoomNightPrice(roomId, dateStr, prices) {
     const room = prices.rooms?.[roomId];
     if (!room) return 0;
 
-    // Проверяем специальную цену на дату
     const datePrice = prices.roomDatePrices?.[roomId]?.[dateStr];
     if (datePrice) return datePrice;
 
-    // Применяем динамические цены
     if (prices.occupancyRules?.enabled) {
         const occupancy = getOccupancyForDate(dateStr, prices);
         for (const rule of (prices.occupancyRules.thresholds || [])) {
@@ -141,12 +199,9 @@ function getRoomNightPrice(roomId, dateStr, prices) {
 }
 
 function getTourDatePrice(tourId, tourName, dateStr, prices) {
-    // Проверяем специальную цену на дату
     if (tourId && prices.tourDatePrices?.[tourId]?.[dateStr]) {
         return prices.tourDatePrices[tourId][dateStr];
     }
-
-    // Ищем тур по имени или ID
     const tour = prices.tours?.[tourId] || Object.values(prices.tours || {}).find(t => t.name === tourName);
     return tour?.price || 0;
 }
@@ -203,7 +258,7 @@ function eachBookedDay(booking, callback) {
         const start = new Date(validateDate(booking.checkIn));
         const end = new Date(validateDate(booking.checkOut));
         while (start < end) {
-            callback(start.toISOString().split('T')[0]);
+            callback(toLocalDateString(start));
             start.setDate(start.getDate() + 1);
         }
     } catch (error) {
@@ -331,7 +386,17 @@ async function initData() {
         .select('id,data')
         .order('created_at', { ascending: true });
     if (bookingsError) throw bookingsError;
-    bookingsCache = { bookings: (bookingRows || []).map(row => ({ ...(row.data || {}), id: row.id })) };
+
+    // Обрабатываем даты при загрузке
+    bookingsCache = { bookings: (bookingRows || []).map(row => {
+            const data = row.data || {};
+            return {
+                ...data,
+                id: row.id,
+                checkIn: data.checkIn ? toLocalDateString(data.checkIn) : null,
+                checkOut: data.checkOut ? toLocalDateString(data.checkOut) : null
+            };
+        }) };
 
     await loadAdminAccounts();
 }
@@ -389,30 +454,32 @@ function loadBookings() {
 }
 
 async function saveBookings(data) {
-    console.log('📦 saveBookings: saving', data.bookings?.length || 0, 'bookings');
+    console.log(`📦 saveBookings: ${data.bookings?.length || 0} бронирований`);
 
     bookingsCache = clone(data);
     const rows = (data.bookings || []).map(booking => {
-        // ВАЖНО: валидируем даты, но если они null - оставляем null
+        // ПРИНУДИТЕЛЬНО преобразуем даты
         let checkIn = null;
         let checkOut = null;
 
         if (booking.checkIn) {
-            try {
-                checkIn = validateDate(booking.checkIn);
-            } catch (e) {
-                console.error(`❌ Invalid checkIn for booking ${booking.id}:`, booking.checkIn);
-                throw new Error(`Booking ${booking.id}: invalid checkIn "${booking.checkIn}"`);
-            }
+            checkIn = toLocalDateString(booking.checkIn);
+            console.log(`📅 Booking ${booking.id} checkIn: "${checkIn}"`);
         }
 
         if (booking.checkOut) {
-            try {
-                checkOut = validateDate(booking.checkOut);
-            } catch (e) {
-                console.error(`❌ Invalid checkOut for booking ${booking.id}:`, booking.checkOut);
-                throw new Error(`Booking ${booking.id}: invalid checkOut "${booking.checkOut}"`);
-            }
+            checkOut = toLocalDateString(booking.checkOut);
+            console.log(`📅 Booking ${booking.id} checkOut: "${checkOut}"`);
+        }
+
+        // Проверяем, что даты в правильном формате
+        if (checkIn && !/^\d{4}-\d{2}-\d{2}$/.test(checkIn)) {
+            console.error(`❌ Неверный checkIn для ${booking.id}: "${checkIn}"`);
+            throw new Error(`Invalid checkIn for booking ${booking.id}: "${checkIn}"`);
+        }
+        if (checkOut && !/^\d{4}-\d{2}-\d{2}$/.test(checkOut)) {
+            console.error(`❌ Неверный checkOut для ${booking.id}: "${checkOut}"`);
+            throw new Error(`Invalid checkOut for booking ${booking.id}: "${checkOut}"`);
         }
 
         return {
@@ -422,7 +489,7 @@ async function saveBookings(data) {
             check_in: checkIn,
             check_out: checkOut,
             created_at: booking.createdAt || new Date().toISOString(),
-            data: booking
+            data: { ...booking, checkIn, checkOut }
         };
     });
 
@@ -435,16 +502,16 @@ async function saveBookings(data) {
 
     // Вставляем новые записи
     if (rows.length) {
-        console.log('📊 Inserting rows:', rows.map(r => ({ id: r.id, check_in: r.check_in, check_out: r.check_out })));
+        console.log('📊 Вставляем строки:', rows.map(r => ({ id: r.id, check_in: r.check_in, check_out: r.check_out })));
         const { error: insertError } = await supabase
             .from('bookings')
             .insert(rows);
         if (insertError) {
-            console.error('❌ Insert error:', insertError);
+            console.error('❌ Ошибка вставки:', insertError);
             throw insertError;
         }
     }
-    console.log('✅ saveBookings completed');
+    console.log('✅ saveBookings завершено');
 }
 
 function loadPrices() {
@@ -541,7 +608,7 @@ app.get('/api/booked-dates', (req, res) => {
             const end = new Date(validateDate(booking.checkOut));
 
             while (start < end) {
-                const dateStr = start.toISOString().split('T')[0];
+                const dateStr = toLocalDateString(start);
                 bookedDates[booking.roomId].push(dateStr);
                 start.setDate(start.getDate() + 1);
             }
@@ -803,7 +870,7 @@ app.post('/api/admin/move-booking', async (req, res) => {
             const nights = Math.max(1, Math.round((oldOut - oldIn) / 86400000));
             newOut.setDate(newOut.getDate() + nights);
         }
-        const newOutStr = newOut.toISOString().split('T')[0];
+        const newOutStr = toLocalDateString(newOut);
 
         const closedDate = hasClosedDates(validNewCheckIn, newOutStr, booking.type || 'room', prices);
         if (closedDate) {
