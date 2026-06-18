@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Админ-панель | Meskhi House</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<div class="admin-container">
+    <!-- Форма входа -->
+    <div id="loginSection">
+        <div class="login-card">
+            <i class="fas fa-key"></i>
+            <h2>Вход в админ-панель</h2>
+            <p>Введите логин и пароль для управления бронированиями</p>
+            <input type="text" id="adminUsername" placeholder="Логин" autocomplete="username">
+            <input type="password" id="adminPassword" placeholder="Пароль" autocomplete="current-password">
+            <button onclick="login()" class="btn-primary">Войти</button>
+        </div>
+    </div>
+
+    <!-- Админ панель -->
+    <div id="adminSection" style="display: none;">
+        <div class="admin-header">
+            <h2><i class="fas fa-calendar-check"></i> Управление бронированиями</h2>
+            <div class="admin-buttons">
+                <button onclick="refreshData()" class="btn-secondary refresh-btn" title="Обновить данные">
+                    <i class="fas fa-sync-alt"></i> Обновить
+                </button>
+                <button onclick="exportToExcel()" class="btn-secondary export-btn" title="Экспорт в Excel">
+                    <i class="fas fa-file-excel"></i> Экспорт Excel
+                </button>
+                <button onclick="logout()" class="logout-btn">
+                    <i class="fas fa-sign-out-alt"></i> Выйти
+                </button>
+            </div>
+        </div>
+
+        <!-- Статистика -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <h3 id="totalStats">0</h3>
+                <p><i class="fas fa-calendar-alt"></i> Всего бронирований</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="activeStats">0</h3>
+                <p><i class="fas fa-check-circle"></i> Активных</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="cancelledStats">0</h3>
+                <p><i class="fas fa-ban"></i> Отмененных</p>
+            </div>
+            <div class="stat-card revenue-card">
+                <h3 id="revenueStats">0₾</h3>
+                <p><i class="fas fa-coins"></i> Доход всего</p>
+            </div>
+            <div class="stat-card revenue-card">
+                <h3 id="monthRevenueStats">0₾</h3>
+                <p><i class="fas fa-chart-line"></i> Доход за месяц</p>
+            </div>
+            <div class="stat-card revenue-card">
+                <h3 id="futureRevenueStats">0₾</h3>
+                <p><i class="fas fa-calendar-plus"></i> Будущие брони</p>
+            </div>
+        </div>
+
+        <div class="admin-tools-grid single-tool">
+            <div class="analytics-card">
+                <h3><i class="fas fa-chart-pie"></i> Аналитика доходов</h3>
+                <div id="analyticsSummary" class="analytics-summary">Загрузка...</div>
+            </div>
+        </div>
+
+        <!-- Фильтры и сортировка -->
+        <div class="filters-row">
+            <span class="filter-label"><i class="fas fa-filter"></i> Созданы за:</span>
+            <div class="filter-buttons">
+                <button onclick="setFilter('7', this)" class="filter-btn">7 дней</button>
+                <button onclick="setFilter('30', this)" class="filter-btn">30 дней</button>
+                <button onclick="setFilter('60', this)" class="filter-btn">60 дней</button>
+                <button onclick="setFilter('90', this)" class="filter-btn">90 дней</button>
+                <button onclick="setFilter('year', this)" class="filter-btn">За год</button>
+                <button onclick="setFilter('all', this)" class="filter-btn active">Все</button>
+            </div>
+        </div>
+
+        <!-- Поиск, фильтр типа и сортировка -->
+        <div class="toolbar admin-toolbar">
+            <div class="search-wrapper">
+                <i class="fas fa-search"></i>
+                <input type="text" id="searchInput" class="search-input" placeholder="Поиск по гостю, телефону, Telegram, номеру или туру..." onkeyup="filterBookings()">
+            </div>
+            <select id="typeFilter" class="admin-select" onchange="filterBookings()">
+                <option value="all">Все типы</option>
+                <option value="room">Номера</option>
+                <option value="tour">Туры</option>
+            </select>
+            <select id="dateSort" class="admin-select" onchange="applySortingAndFilters()">
+                <option value="createdDesc">Сначала новые заявки</option>
+                <option value="createdAsc">Сначала старые заявки</option>
+                <option value="checkInAsc">Дата заезда/тура ↑</option>
+                <option value="checkInDesc">Дата заезда/тура ↓</option>
+                <option value="checkOutAsc">Дата выезда ↑</option>
+                <option value="checkOutDesc">Дата выезда ↓</option>
+            </select>
+        </div>
+
+        <!-- Календарь занятости -->
+        <div class="admin-calendar-card">
+            <div class="calendar-header-row">
+                <h3><i class="fas fa-calendar-days"></i> Календарь занятости</h3>
+                <div class="calendar-controls">
+                    <button onclick="changeAdminMonth(-1)" class="btn-secondary"><i class="fas fa-chevron-left"></i></button>
+                    <strong id="adminCalendarTitle"></strong>
+                    <button onclick="changeAdminMonth(1)" class="btn-secondary"><i class="fas fa-chevron-right"></i></button>
+                </div>
+            </div>
+            <div id="adminCalendar" class="admin-calendar-grid"></div>
+        </div>
+
+        <!-- Таблица бронирований -->
+        <div class="bookings-table-wrapper">
+            <table class="bookings-table">
+                <thead>
+                <tr>
+                    <th>ID / Дата</th>
+                    <th>Тип</th>
+                    <th>Название</th>
+                    <th>Гость</th>
+                    <th>Телефон</th>
+                    <th>Telegram</th>
+                    <th>Email</th>
+                    <th>Даты</th>
+                    <th>Гостей</th>
+                    <th>Стоимость</th>
+                    <th>Статус</th>
+                    <th>Действия</th>
+                </tr>
+                </thead>
+                <tbody id="bookingsTableBody">
+                <tr>
+                    <td colspan="12" class="empty-state">
+                        <i class="fas fa-calendar-check"></i>
+                        <p>Загрузка бронирований...</p>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script src="/js/admin.js"></script>
+</body>
+</html>

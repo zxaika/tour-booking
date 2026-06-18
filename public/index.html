@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Meskhi House | Гостевой дом в Поти, Грузия</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="scroll-wine" aria-hidden="true">
+    <div class="scroll-wine__bottle">
+        <div class="scroll-wine__neck"></div>
+        <div class="scroll-wine__body">
+            <div class="scroll-wine__shine"></div>
+            <div class="scroll-wine__liquid"></div>
+        </div>
+    </div>
+</div>
+
+<div class="site-wrapper">
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-flex">
+                <div class="logo">
+                    <h1>🏠 Meskhi House</h1>
+                    <p>Родовой дом у Чёрного моря • Поти</p>
+                </div>
+                <div class="nav-links">
+                    <a href="#home">Главная</a>
+                    <a href="#rooms">Номера</a>
+                    <a href="#tours">Туры</a>
+                    <a href="#media">Галерея</a>
+                    <a href="#contacts">Контакты</a>
+                    <a href="/admin.html" class="admin-link"><i class="fas fa-user-shield"></i> Админ</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main>
+        <!-- Hero секция -->
+        <section id="home" class="hero">
+            <div class="container">
+                <div class="hero-grid">
+                    <div class="hero-text">
+                        <span class="hero-badge"><i class="fas fa-heart"></i> Гамарджоба, генацвале!</span>
+                        <h1>Дом у моря <br>с душой настоящей Грузии</h1>
+                        <p class="hero-subtitle"><strong>Наташа & Полина</strong> — семья Месхи приглашает в Поти</p>
+                        <ul class="hero-features">
+                            <li><i class="fas fa-check-circle"></i> Первая линия у Чёрного моря</li>
+                            <li><i class="fas fa-check-circle"></i> Без туристических толп и шума</li>
+                            <li><i class="fas fa-check-circle"></i> Домашние хинкали и хачапури</li>
+                            <li><i class="fas fa-check-circle"></i> Вечера с вином и душевными тостами</li>
+                            <li><i class="fas fa-check-circle"></i> С 1975 года принимаем гостей</li>
+                        </ul>
+                    </div>
+                    <div class="hero-carousel-wrapper">
+<div class="hero-carousel-title">
+
+</div>
+<div class="room-gallery hero-gallery" data-room-gallery="hero" data-current="0">
+<div class="room-gallery-track">
+<div class="room-slide active"><img src="images/mainimg/photo-01.jpg" alt="Фото 1" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"><div class="room-photo-placeholder" style="display:none;"><i class="fas fa-camera"></i><span>Фото 1</span><small>images/mainimg/photo-01.jpg</small></div></div>
+<div class="room-slide"><img src="images/mainimg/photo-02.jpg" alt="Фото 2" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"><div class="room-photo-placeholder" style="display:none;"><i class="fas fa-camera"></i><span>Фото 2</span><small>images/mainimg/photo-02.jpg</small></div></div>
+<div class="room-slide"><img src="images/mainimg/photo-03.jpg" alt="Фото 3" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"><div class="room-photo-placeholder" style="display:none;"><i class="fas fa-camera"></i><span>Фото 3</span><small>images/mainimg/photo-03.jpg</small></div></div>
+<div class="room-slide"><img src="images/mainimg/photo-04.jpg" alt="Фото 4" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"><div class="room-photo-placeholder" style="display:none;"><i class="fas fa-camera"></i><span>Фото 4</span><small>images/mainimg/photo-04.jpg</small></div></div>
+</div>
+<button type="button" class="room-gallery-btn prev" onclick="changeRoomSlide('hero', -1)"><i class="fas fa-chevron-left"></i></button>
+<button type="button" class="room-gallery-btn next" onclick="changeRoomSlide('hero', 1)"><i class="fas fa-chevron-right"></i></button>
+<div class="room-gallery-dots">
+<button type="button" class="room-gallery-dot active" onclick="showRoomSlide('hero', 0)"></button>
+<button type="button" class="room-gallery-dot" onclick="showRoomSlide('hero', 1)"></button>
+<button type="button" class="room-gallery-dot" onclick="showRoomSlide('hero', 2)"></button>
+<button type="button" class="room-gallery-dot" onclick="showRoomSlide('hero', 3)"></button>
+</div></div></div>
+<div class="hero-stats" style="display:none;">
+                        <i class="fas fa-wine-bottle"></i>
+                        
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- История -->
+        <section class="history-section">
+            <div class="container">
+                <div class="history-card">
+                    <i class="fas fa-home"></i>
+                    <h3>Наша история</h3>
+                    <p>В то время как одни берегут фамильные драгоценности, наша семья сохранила нечто большее – родовой дом в Грузии в городе Поти, на берегу Чёрного моря. С 1975 года дом принимает гостей. В 2014 году мы вернулись на родину дедушки и восстановили родовое гнездо. Теперь он снова полон жизни, вина и хороших историй!</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Номера -->
+        <section id="rooms" class="rooms-section">
+            <div class="container">
+                <h2 class="section-title"><i class="fas fa-bed"></i> Наши номера</h2>
+                <div class="availability-box">
+                    <div>
+                        <h3><i class="fas fa-search"></i> Найти свободный номер</h3>
+                        <p>Выберите даты — сайт покажет только доступные номера и цену за весь период.</p>
+                    </div>
+                    <div class="availability-controls">
+                        <input type="text" id="availabilityDates" placeholder="Заезд — выезд" readonly>
+                        <button type="button" onclick="searchAvailableRooms()"><i class="fas fa-magnifying-glass"></i> Показать свободные</button>
+                        <button type="button" class="btn-light" onclick="resetAvailableRooms()">Все номера</button>
+                    </div>
+                    <div id="availableRoomsResult" class="available-result"></div>
+                </div>
+                <div class="rooms-grid" id="roomsGrid"></div>
+            </div>
+        </section>
+
+        <!-- Туры -->
+        <section id="tours" class="tours-section">
+            <div class="container">
+                <h2 class="section-title"><i class="fas fa-hiking"></i> Авторские туры</h2>
+                <div class="tours-grid" id="toursGrid"></div>
+            </div>
+        </section>
+
+        <!-- Общая медиа-галерея -->
+        <section id="media" class="media-section">
+            <div class="container">
+                <h2 class="section-title"><i class="fas fa-images"></i> Фото и видео Meskhi House</h2>
+                <div class="media-grid" id="extraMediaGrid"></div>
+            </div>
+        </section>
+
+        <!-- Контакты -->
+        <section id="contacts" class="contacts-section">
+            <div class="container">
+                <h2 class="section-title"><i class="fas fa-address-card"></i> Контакты</h2>
+                <div class="contacts-grid">
+                    <div class="contact-card"><i class="fas fa-phone-alt"></i><h3>Телефоны</h3><p><a href="tel:+79093702144">+7 909 370 2144</a></p><p><a href="tel:+995595031350">+995 595 03 13 50</a></p></div>
+                    <div class="contact-card"><i class="fab fa-telegram"></i><h3>Telegram</h3><p><a href="https://t.me/posya_klevakina" target="_blank" rel="noopener">@posya_klevakina</a></p><p><a href="https://t.me/natasha_tshn" target="_blank" rel="noopener">@natasha_tshn</a></p></div>
+                    <div class="contact-card"><i class="fab fa-instagram"></i><h3>Instagram</h3><p><a href="https://www.instagram.com/natasha_tshn" target="_blank" rel="noopener">natasha_tshn</a></p><p><a href="https://www.instagram.com/posya_gruzinochka" target="_blank" rel="noopener">posya_gruzinochka</a></p></div>
+                    <div class="contact-card"><i class="fas fa-map-marker-alt"></i><h3>Адрес</h3><p><a href="https://www.google.com/maps?q=42.140698,41.659108" target="_blank" rel="noopener">Поти, ул. Вахтанга Горгасали 98</a></p><p>Координаты: 42.140698, 41.659108</p></div>
+                </div>
+                <div class="map-wrapper">
+                    <iframe title="Meskhi House на карте" src="https://www.google.com/maps?q=42.140698,41.659108&z=16&output=embed" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>© 2025 Сёстры Месхи — ваша настоящая Грузия</p>
+            <p class="footer-quote">«В России работаем и зарабатываем, в Грузии отдыхаем и тратим»</p>
+        </div>
+    </footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
+<script src="/js/main.js"></script>
+</body>
+</html>

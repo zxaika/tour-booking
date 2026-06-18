@@ -1,0 +1,671 @@
+/* ========== АДМИН-ПАНЕЛЬ ========== */
+.admin-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 30px 24px;
+    min-height: 100vh;
+}
+
+/* Форма входа */
+.login-card {
+    max-width: 400px;
+    margin: 80px auto;
+    background: white;
+    padding: 40px;
+    border-radius: 32px;
+    text-align: center;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+}
+
+.login-card i {
+    font-size: 3rem;
+    color: #b45f2b;
+}
+
+.login-card h2 {
+    margin: 16px 0;
+    color: #2c4b3e;
+}
+
+.login-card p {
+    color: #6b5b4a;
+    margin-bottom: 20px;
+}
+
+.login-card input {
+    width: 100%;
+    padding: 14px;
+    margin: 20px 0;
+    border: 1px solid #e2d6c8;
+    border-radius: 16px;
+    font-size: 1rem;
+    font-family: inherit;
+}
+
+.login-card input:focus {
+    outline: none;
+    border-color: #b45f2b;
+}
+
+/* Заголовок админки */
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.admin-header h2 {
+    color: #2c4b3e;
+    font-size: 1.5rem;
+}
+
+.admin-header h2 i {
+    color: #b45f2b;
+    margin-right: 10px;
+}
+
+.admin-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* Кнопки */
+.btn-primary {
+    background: #b45f2b;
+    color: white;
+    padding: 12px 32px;
+    border: none;
+    border-radius: 40px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+.btn-primary:hover {
+    background: #2c4b3e;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 40px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+}
+
+.btn-secondary:hover {
+    background: #5a6268;
+}
+
+.refresh-btn {
+    background: #17a2b8;
+}
+
+.refresh-btn:hover {
+    background: #138496;
+}
+
+.export-btn {
+    background: #28a745;
+}
+
+.export-btn:hover {
+    background: #218838;
+}
+
+.logout-btn {
+    background: #dc3545;
+    color: white;
+    padding: 10px 24px;
+    border: none;
+    border-radius: 40px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background 0.2s;
+}
+
+.logout-btn:hover {
+    background: #c82333;
+}
+
+/* Статистика */
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.stat-card {
+    background: white;
+    padding: 25px;
+    border-radius: 24px;
+    text-align: center;
+    border: 1px solid #e6ddd0;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.stat-card h3 {
+    font-size: 2.2rem;
+    color: #b45f2b;
+    margin-bottom: 8px;
+}
+
+.stat-card p {
+    color: #6b5b4a;
+    font-weight: 500;
+}
+
+.stat-card p i {
+    margin-right: 6px;
+    color: #b45f2b;
+}
+
+/* Фильтры */
+.filters-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    background: white;
+    padding: 12px 20px;
+    border-radius: 50px;
+    border: 1px solid #e6ddd0;
+}
+
+.filter-label {
+    font-weight: 600;
+    color: #2c4b3e;
+}
+
+.filter-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.filter-btn {
+    padding: 6px 16px;
+    background: #f0ebe5;
+    border: none;
+    border-radius: 30px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+
+.filter-btn:hover {
+    background: #e2d6c8;
+}
+
+.filter-btn.active {
+    background: #b45f2b;
+    color: white;
+}
+
+/* Панель инструментов */
+.toolbar {
+    margin-bottom: 20px;
+}
+
+.search-wrapper {
+    position: relative;
+    max-width: 400px;
+}
+
+.search-wrapper i {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #b45f2b;
+}
+
+.search-input {
+    width: 100%;
+    padding: 12px 16px 12px 45px;
+    border: 1px solid #e2d6c8;
+    border-radius: 40px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: #b45f2b;
+    box-shadow: 0 0 0 2px rgba(180, 95, 43, 0.1);
+}
+
+/* Таблица бронирований */
+.bookings-table-wrapper {
+    overflow-x: auto;
+    background: white;
+    border-radius: 24px;
+    padding: 20px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.bookings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.bookings-table th,
+.bookings-table td {
+    padding: 14px 12px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+
+.bookings-table th {
+    background: #f9f5f0;
+    font-weight: 600;
+    color: #3e2c21;
+    white-space: nowrap;
+}
+
+.bookings-table tr:hover {
+    background: #fefaf5;
+}
+
+/* Статусы */
+.status-confirmed {
+    background: #d4edda;
+    color: #155724;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    display: inline-block;
+}
+
+.status-cancelled {
+    background: #f8d7da;
+    color: #721c24;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    display: inline-block;
+}
+
+/* Кнопки действий */
+.actions-cell {
+    white-space: nowrap;
+}
+
+.action-btn {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    transition: opacity 0.2s;
+    margin: 2px;
+}
+
+.action-btn:hover {
+    opacity: 0.8;
+}
+
+.cancel-btn {
+    background: #ffc107;
+    color: #333;
+}
+
+.delete-btn {
+    background: #dc3545;
+    color: white;
+}
+
+/* Пустое состояние */
+.empty-state {
+    text-align: center;
+    padding: 50px;
+    color: #999;
+}
+
+.empty-state i {
+    font-size: 3rem;
+    color: #b45f2b;
+    margin-bottom: 16px;
+}
+
+/* Уведомления */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    animation: slideInRight 0.3s ease;
+}
+
+.notification-content {
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.notification-success .notification-content {
+    background: #d4edda;
+    color: #155724;
+    border-left: 4px solid #28a745;
+}
+
+.notification-error .notification-content {
+    background: #f8d7da;
+    color: #721c24;
+    border-left: 4px solid #dc3545;
+}
+
+.notification-info .notification-content {
+    background: #d1ecf1;
+    color: #0c5460;
+    border-left: 4px solid #17a2b8;
+}
+
+/* Анимации */
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOutRight {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}
+
+/* Дополнительные элементы */
+.booking-date-small {
+    font-size: 0.65rem;
+    color: #999;
+    display: block;
+    margin-top: 4px;
+}
+
+/* Адаптив */
+@media (max-width: 1024px) {
+    .bookings-table {
+        font-size: 0.75rem;
+    }
+
+    .bookings-table th,
+    .bookings-table td {
+        padding: 10px 8px;
+    }
+}
+
+@media (max-width: 768px) {
+    .admin-container {
+        padding: 15px;
+    }
+
+    .stat-card h3 {
+        font-size: 1.5rem;
+    }
+
+    .admin-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .admin-buttons {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .login-card {
+        margin: 40px 20px;
+        padding: 30px;
+    }
+
+    .filters-row {
+        flex-direction: column;
+        align-items: flex-start;
+        border-radius: 20px;
+    }
+}
+
+@media (max-width: 480px) {
+    .stats-row {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-buttons {
+        flex-direction: column;
+    }
+
+    .admin-buttons button {
+        width: 100%;
+    }
+
+    .booking-date-small {
+        font-size: 0.55rem;
+    }
+
+    .action-btn {
+        padding: 4px 10px;
+        font-size: 0.7rem;
+    }
+}
+.admin-toolbar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.admin-select {
+    padding: 12px 16px;
+    border: 1px solid #e2d6c8;
+    border-radius: 40px;
+    background: white;
+    color: #3e2c21;
+    font-family: inherit;
+    font-size: 0.9rem;
+    min-width: 190px;
+}
+
+.admin-select:focus {
+    outline: none;
+    border-color: #b45f2b;
+    box-shadow: 0 0 0 2px rgba(180, 95, 43, 0.1);
+}
+
+.bookings-table th {
+    user-select: none;
+}
+
+@media (max-width: 768px) {
+    .admin-toolbar,
+    .search-wrapper,
+    .admin-select {
+        width: 100%;
+        max-width: none;
+    }
+}
+
+/* Исправление панели поиска, фильтра и сортировки в админке */
+.admin-toolbar {
+    display: grid;
+    grid-template-columns: minmax(360px, 1fr) minmax(220px, 260px) minmax(300px, 340px);
+    gap: 16px;
+    align-items: center;
+}
+
+.admin-toolbar .search-wrapper {
+    max-width: none;
+    width: 100%;
+}
+
+.admin-toolbar .search-input,
+.admin-toolbar .admin-select {
+    width: 100%;
+    min-height: 54px;
+    font-size: 1rem;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.admin-toolbar .admin-select {
+    min-width: 0;
+    appearance: auto;
+}
+
+@media (max-width: 1100px) {
+    .admin-toolbar {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+/* Occupancy calendar */
+.admin-calendar-card {
+    background: #fffaf3;
+    border: 1px solid #eadfce;
+    border-radius: 28px;
+    padding: 22px;
+    margin: 24px 0;
+    box-shadow: 0 10px 28px rgba(62, 44, 33, 0.06);
+}
+
+.calendar-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.calendar-header-row h3 { margin: 0; color: #3e2c21; }
+.calendar-controls { display: flex; align-items: center; gap: 12px; }
+.calendar-controls strong { min-width: 170px; text-align: center; text-transform: capitalize; }
+
+.admin-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(130px, 1fr));
+    gap: 8px;
+    overflow-x: auto;
+}
+
+.calendar-weekday {
+    font-weight: 800;
+    color: #6b5b4a;
+    text-align: center;
+    padding: 8px;
+}
+
+.calendar-day {
+    min-height: 110px;
+    background: #fff;
+    border: 1px solid #eadfce;
+    border-radius: 16px;
+    padding: 8px;
+    position: relative;
+}
+
+.calendar-day.muted { opacity: .45; }
+.calendar-day.busy { background: #fff0e6; border-color: #d17a44; box-shadow: inset 0 0 0 1px rgba(180,95,43,.18); }
+.day-number { font-weight: 800; color: #3e2c21; margin-bottom: 6px; }
+.free-day { font-size: .74rem; color: #9c8b7c; }
+.calendar-booking {
+    display: grid;
+    gap: 2px;
+    padding: 6px;
+    margin-top: 5px;
+    border-radius: 10px;
+    background: #b45f2b;
+    color: white;
+    font-size: .72rem;
+    line-height: 1.25;
+}
+.calendar-booking.tour { background: #2c4b3e; }
+.calendar-booking span, .calendar-booking strong { overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 900px) {
+    .admin-calendar-card { padding: 16px; border-radius: 20px; }
+    .admin-calendar-grid { grid-template-columns: repeat(7, 120px); }
+    .calendar-day { min-height: 100px; }
+}
+
+@media (max-width: 520px) {
+    .calendar-header-row { align-items: stretch; }
+    .calendar-controls { width: 100%; justify-content: space-between; }
+    .calendar-controls strong { min-width: 120px; font-size: .9rem; }
+}
+
+/* Дополнительные инструменты: аналитика, QR, drag-and-drop */
+.admin-tools-grid {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(220px, 320px);
+    gap: 20px;
+    margin-bottom: 24px;
+}
+.analytics-card,
+.qr-card {
+    background: #fff;
+    border: 1px solid #e6ddd0;
+    border-radius: 24px;
+    padding: 22px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.05);
+}
+.analytics-card h3,
+.qr-card h3 { color: #2c4b3e; margin-bottom: 14px; }
+.analytics-card i,
+.qr-card i { color: #b45f2b; }
+.analytics-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+.analytics-summary span {
+    background: #f9f2ea;
+    border-radius: 16px;
+    padding: 14px;
+}
+.qr-card img {
+    display: block;
+    max-width: 180px;
+    width: 100%;
+    margin: 8px auto 12px;
+}
+.calendar-booking[draggable="true"] { cursor: grab; }
+.calendar-day.drop-target {
+    outline: 3px dashed #b45f2b;
+    outline-offset: -4px;
+    background: #fff7ed;
+}
+.calendar-booking.closed {
+    background: #dc3545;
+    color: #fff;
+}
+.receipt-btn { background: #6f42c1; color: #fff; }
+.receipt-btn:hover { background: #59359a; }
+@media (max-width: 800px) {
+    .admin-tools-grid { grid-template-columns: 1fr; }
+}
