@@ -86,20 +86,48 @@ async function loadPrices() {
     }
 }
 
+// ========== ИСПРАВЛЕННЫЕ ФУНКЦИИ РАБОТЫ С ДАТАМИ ==========
 function toLocalDateString(date) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    // Если это уже строка в формате YYYY-MM-DD, возвращаем как есть
+    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return date;
+    }
+    // Если это Date объект
+    if (date instanceof Date && !isNaN(date)) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    // Пробуем распарсить строку
+    try {
+        const parsed = new Date(date);
+        if (!isNaN(parsed)) {
+            const y = parsed.getFullYear();
+            const m = String(parsed.getMonth() + 1).padStart(2, '0');
+            const d = String(parsed.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+    } catch (e) {}
+    return String(date);
 }
 
 function parseLocalDate(dateString) {
     if (dateString instanceof Date) return normalizeDate(dateString);
-    const [y, m, d] = String(dateString).split('-').map(Number);
-    return new Date(y, m - 1, d);
+    const str = String(dateString);
+    // Если строка уже в формате YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+        const [y, m, d] = str.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    }
+    // Пробуем распарсить через Date
+    const parsed = new Date(str);
+    if (!isNaN(parsed)) return normalizeDate(parsed);
+    return new Date();
 }
 
 function formatDate(dateString) {
+    if (!dateString) return '';
     const date = parseLocalDate(dateString);
     return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 }
@@ -107,6 +135,8 @@ function formatDate(dateString) {
 function normalizeDate(date) {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
+
+// ========== КОНЕЦ ИСПРАВЛЕННЫХ ФУНКЦИЙ ==========
 
 async function loadBookedDates() {
     try {
@@ -162,6 +192,7 @@ function createRoomCalendar(roomId, roomPrice) {
                     return;
                 }
 
+                // ИСПРАВЛЕНО: используем toLocalDateString для преобразования
                 const checkInStr = toLocalDateString(checkIn);
                 const checkOutStr = toLocalDateString(checkOut);
                 let total = roomPrice * nights;
@@ -181,7 +212,8 @@ function createRoomCalendar(roomId, roomPrice) {
                 const result = await response.json();
 
                 if (result.available) {
-                    showBookingForm('room', roomId, ROOMS[roomId].name, roomPrice, checkIn, checkOut, nights, total);
+                    // ИСПРАВЛЕНО: передаем checkIn и checkOut как строки
+                    showBookingForm('room', roomId, ROOMS[roomId].name, roomPrice, checkInStr, checkOutStr, nights, total);
                 } else {
                     alert('❌ ' + (result.reason || 'К сожалению, эти даты уже заняты. Выберите другие.'));
                     instance.clear();
@@ -216,6 +248,7 @@ function createTourCalendar(tour) {
                 const daysCount = tour.days || 1;
                 const checkOut = new Date(checkIn);
                 checkOut.setDate(checkOut.getDate() + Math.max(daysCount - 1, 0));
+                // ИСПРАВЛЕНО: используем toLocalDateString
                 const checkInStr = toLocalDateString(checkIn);
                 const checkOutStr = toLocalDateString(checkOut);
                 let total = tour.price;
@@ -226,7 +259,8 @@ function createTourCalendar(tour) {
                     instance.clear();
                     return;
                 }
-                showBookingForm('tour', tour.id, tour.name, tour.price, checkIn, checkOut, daysCount, total);
+                // ИСПРАВЛЕНО: передаем строки
+                showBookingForm('tour', tour.id, tour.name, tour.price, checkInStr, checkOutStr, daysCount, total);
             }
         }
     });
@@ -234,9 +268,11 @@ function createTourCalendar(tour) {
     return calendarDiv;
 }
 
+// ИСПРАВЛЕНА: функция showBookingForm теперь принимает строки с датами
 function showBookingForm(type, id, name, price, checkInDate, checkOutDate, nights, total) {
-    const checkInStr = toLocalDateString(checkInDate);
-    const checkOutStr = toLocalDateString(checkOutDate);
+    // checkInDate и checkOutDate теперь строки в формате YYYY-MM-DD
+    const checkInStr = String(checkInDate);
+    const checkOutStr = String(checkOutDate);
     const formattedCheckIn = formatDate(checkInStr);
     const formattedCheckOut = formatDate(checkOutStr);
     const typeText = type === 'tour' ? 'Тур' : 'Номер';
@@ -307,12 +343,17 @@ function closeBookingForm() {
     if (overlay) overlay.remove();
 }
 
+// ИСПРАВЛЕНА: функция submitBooking
 async function submitBooking(e) {
     e.preventDefault();
 
     const type = document.getElementById('formType').value;
     const id = parseInt(document.getElementById('formId').value);
     const name = document.getElementById('formName').value;
+
+    // Даты уже в правильном формате YYYY-MM-DD из hidden полей
+    const checkIn = document.getElementById('formCheckIn').value;
+    const checkOut = document.getElementById('formCheckOut').value;
 
     const bookingData = {
         type: type,
@@ -324,8 +365,8 @@ async function submitBooking(e) {
         guestTelegram: document.getElementById('guestTelegram').value,
         guestEmail: document.getElementById('guestEmail').value,
         guestsCount: parseInt(document.getElementById('guestsCount').value),
-        checkIn: document.getElementById('formCheckIn').value,
-        checkOut: document.getElementById('formCheckOut').value,
+        checkIn: checkIn,  // УЖЕ в формате YYYY-MM-DD
+        checkOut: checkOut, // УЖЕ в формате YYYY-MM-DD
         totalPrice: parseInt(document.getElementById('formTotal').value),
         notes: document.getElementById('notes').value
     };
@@ -364,6 +405,7 @@ async function submitBooking(e) {
     }
 }
 
+// ========== ОСТАЛЬНЫЕ ФУНКЦИИ БЕЗ ИЗМЕНЕНИЙ ==========
 
 async function loadRoomMedia() {
     try {
@@ -502,15 +544,15 @@ function renderExtraMedia() {
         <div class="media-slider-window">
             <div class="media-slider-track" id="mediaSliderTrack">
                 ${extraMediaItems.map((item, index) => {
-                    const isVideo = item.type === 'video';
-                    return `
+        const isVideo = item.type === 'video';
+        return `
                         <article class="media-slide" data-media-index="${index}">
                             ${isVideo
-                                ? `<video src="${item.src}" controls muted playsinline preload="metadata"></video><div class="media-caption"><i class="fas fa-video"></i> ${item.title || 'Видео'} · ${item.src}</div>`
-                                : `<img src="${item.src}" alt="${item.title || 'Фото'}" onclick="openMediaFullscreen(${index})" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"><div class="media-placeholder" style="display:none;"><i class="fas fa-camera"></i><span>${item.title || 'Фото'}</span><small>${item.src}</small></div>`}
+            ? `<video src="${item.src}" controls muted playsinline preload="metadata"></video><div class="media-caption"><i class="fas fa-video"></i> ${item.title || 'Видео'} · ${item.src}</div>`
+            : `<img src="${item.src}" alt="${item.title || 'Фото'}" onclick="openMediaFullscreen(${index})" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"><div class="media-placeholder" style="display:none;"><i class="fas fa-camera"></i><span>${item.title || 'Фото'}</span><small>${item.src}</small></div>`}
                         </article>
                     `;
-                }).join('')}
+    }).join('')}
             </div>
         </div>
         <button type="button" class="media-nav prev" onclick="changeMediaSlide(-1)"><i class="fas fa-chevron-left"></i></button>
@@ -588,7 +630,7 @@ async function searchAvailableRooms() {
             if (card) card.style.display = '';
         });
         resultBox.innerHTML = `<strong>Свободно: ${data.rooms.length}</strong> · ${formatDate(checkIn)} — ${formatDate(checkOut)} · ${data.nights} ноч.` +
-            data.rooms.map(room => `<button type="button" onclick="showBookingForm('room', ${room.id}, '${room.name}', ${room.price}, new Date('${checkIn}'), new Date('${checkOut}'), ${data.nights}, ${room.total})">${room.name} — ${room.total}₾</button>`).join('');
+            data.rooms.map(room => `<button type="button" onclick="showBookingForm('room', ${room.id}, '${room.name}', ${room.price}, '${checkIn}', '${checkOut}', ${data.nights}, ${room.total})">${room.name} — ${room.total}₾</button>`).join('');
     } catch (error) {
         resultBox.innerHTML = 'Ошибка: ' + error.message;
     }
@@ -632,8 +674,6 @@ function renderTours() {
         card.querySelector('.tour-calendar-container').appendChild(createTourCalendar(tour));
     });
 }
-
-
 
 function initScrollWineBottle() {
     const bottle = document.querySelector('.scroll-wine');
