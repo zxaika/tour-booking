@@ -1038,4 +1038,5 @@ initData().then(() => {
 }).catch(error => {
     console.error('❌ Ошибка инициализации Supabase:', error);
     process.exit(1);
+
 });
