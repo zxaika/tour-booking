@@ -72,50 +72,51 @@ function clone(value) {
 function toLocalDateString(date) {
     if (!date) return null;
 
-    // Если это уже строка в формате YYYY-MM-DD
-    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        return date;
+    if (typeof date === 'string') {
+        const str = date.trim();
+
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+            return str;
+        }
+
+        const ru = str.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+        if (ru) {
+            return `${ru[3]}-${ru[2]}-${ru[1]}`;
+        }
+
+        const iso = str.match(/^(\d{4}-\d{2}-\d{2})T/);
+        if (iso) {
+            return iso[1];
+        }
     }
 
-    // Если это Date объект
-    if (date instanceof Date && !isNaN(date)) {
+    if (date instanceof Date && !isNaN(date.getTime())) {
         const y = date.getFullYear();
         const m = String(date.getMonth() + 1).padStart(2, '0');
         const d = String(date.getDate()).padStart(2, '0');
         return `${y}-${m}-${d}`;
     }
 
-    // Пробуем распарсить
-    try {
-        const parsed = new Date(date);
-        if (!isNaN(parsed)) {
-            const y = parsed.getFullYear();
-            const m = String(parsed.getMonth() + 1).padStart(2, '0');
-            const d = String(parsed.getDate()).padStart(2, '0');
-            return `${y}-${m}-${d}`;
-        }
-    } catch (e) {}
-
-    // Если ничего не помогло, возвращаем как строку
-    return String(date);
+    return null;
 }
 
 function validateDate(dateStr) {
     if (!dateStr) return null;
 
-    // Принудительно преобразуем в правильный формат
     const result = toLocalDateString(dateStr);
 
-    // Проверяем, что получилось
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(result)) {
-        console.error(`❌ Неверный формат даты: "${dateStr}" -> "${result}"`);
+    if (!result || !/^\d{4}-\d{2}-\d{2}$/.test(result)) {
         throw new Error(`Invalid date format: "${dateStr}". Expected YYYY-MM-DD`);
     }
 
-    // Проверяем, что дата существует
     const [year, month, day] = result.split('-').map(Number);
     const testDate = new Date(year, month - 1, day);
-    if (testDate.getFullYear() !== year || testDate.getMonth() !== month - 1 || testDate.getDate() !== day) {
+
+    if (
+        testDate.getFullYear() !== year ||
+        testDate.getMonth() !== month - 1 ||
+        testDate.getDate() !== day
+    ) {
         throw new Error(`Invalid date: "${result}" does not exist`);
     }
 
@@ -578,23 +579,46 @@ app.post('/api/quote', (req, res) => {
 
         console.log('📥 /api/quote:', { type, roomId, tourId, checkIn, checkOut });
 
-        const validCheckIn = validateDateOrThrow(checkIn, 'checkIn');
-        const validCheckOut = validateDateOrThrow(checkOut, 'checkOut');
+        const bookingType = type || 'room';
 
-        const prices = loadPrices();
-        const closedDate = hasClosedDates(validCheckIn, validCheckOut, type || 'room', prices);
-        if (closedDate) {
-            return res.status(400).json({ error: `Бронирование закрыто на дату ${formatRuDate(closedDate)}` });
+        const validCheckIn = validateDateOrThrow(checkIn, 'checkIn');
+
+        let validCheckOut;
+        if (bookingType === 'tour') {
+            validCheckOut = checkOut ? validateDateOrThrow(checkOut, 'checkOut') : validCheckIn;
+        } else {
+            validCheckOut = validateDateOrThrow(checkOut, 'checkOut');
+
+            if (new Date(validCheckOut) <= new Date(validCheckIn)) {
+                return res.status(400).json({ error: 'Дата выезда должна быть позже даты заезда' });
+            }
         }
 
-        const total = calculateBookingPrice({ type, roomId, tourId, tourName, checkIn: validCheckIn, checkOut: validCheckOut, prices });
-        res.json({ total });
+        const prices = loadPrices();
+
+        const closedDate = hasClosedDates(validCheckIn, validCheckOut, bookingType, prices);
+        if (closedDate) {
+            return res.status(400).json({
+                error: `Бронирование закрыто на дату ${formatRuDate(closedDate)}`
+            });
+        }
+
+        const total = calculateBookingPrice({
+            type: bookingType,
+            roomId,
+            tourId,
+            tourName,
+            checkIn: validCheckIn,
+            checkOut: validCheckOut,
+            prices
+        });
+
+        return res.json({ total });
     } catch (error) {
         console.error('❌ /api/quote error:', error);
         return res.status(400).json({ error: error.message });
     }
 });
-
 app.get('/api/booked-dates', (req, res) => {
     const data = loadBookings();
     const bookedDates = {};
