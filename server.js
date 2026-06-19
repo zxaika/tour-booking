@@ -1022,66 +1022,88 @@ ${booking.type === 'tour' ? `🎯 Тур: ${booking.tourName}` : `🛏 Номе�
 }
 
 // ========== PDF ==========
+// ========== PDF ==========
 function getPdfFontPath() {
     const candidates = [
         process.env.PDF_FONT_PATH,
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf',
-        '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
-        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-        '/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf',
-        '/Library/Fonts/Arial Unicode.ttf',
-        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-        'C:\\Windows\\Fonts\\arial.ttf',
-        'C:\\Windows\\Fonts\\segoeui.ttf'
+        path.join(__dirname, 'public', 'fonts', 'DejaVuSans.ttf'),
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
     ].filter(Boolean);
+
     return candidates.find(file => fs.existsSync(file));
 }
 
-app.get('/api/admin/receipt/:id.pdf', (req, res) => {
-    if (!isAdminAuthorized({ username: req.query.username, password: req.query.password })) {
-        return res.status(401).send('Неверный логин или пароль');
+app.get('/api/admin/receipt/:id.pdf', async (req, res) => {
+    try {
+        if (!isAdminAuthorized({ username: req.query.username, password: req.query.password })) {
+            return res.status(401).send('Неверный логин или пароль');
+        }
+
+        if (!PDFDocument) {
+            return res.status(500).send('PDFKit не установлен. Выполните npm install pdfkit');
+        }
+
+        const { data: row, error } = await supabase
+            .from('bookings')
+            .select('id,data')
+            .eq('id', Number(req.params.id))
+            .maybeSingle();
+
+        if (error) throw error;
+        if (!row) return res.status(404).send('Бронирование не найдено');
+
+        const booking = {
+            id: row.id,
+            ...(row.data || {})
+        };
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="receipt-${booking.id}.pdf"`);
+
+        const doc = new PDFDocument({ margin: 50 });
+        doc.pipe(res);
+
+        const fontPath = getPdfFontPath();
+        if (fontPath) {
+            doc.registerFont('AppFont', fontPath);
+            doc.font('AppFont');
+        }
+
+        const typeLabel = (booking.type || 'room') === 'tour' ? 'Тур' : 'Номер';
+        const itemName = (booking.type || 'room') === 'tour'
+            ? booking.tourName
+            : booking.roomName;
+
+        const statusLabel =
+            booking.status === 'confirmed' ? 'Подтверждено' :
+                booking.status === 'cancelled' ? 'Отменено' :
+                    'Ожидает подтверждения';
+
+        doc.fontSize(20).text('Meskhi House — чек бронирования');
+        doc.moveDown();
+
+        doc.fontSize(12)
+            .text(`Номер бронирования: ${booking.id}`)
+            .text(`Гость: ${booking.guestName || '-'}`)
+            .text(`Телефон: ${booking.guestPhone || '-'}`)
+            .text(`Telegram: ${booking.guestTelegram || '-'}`)
+            .text(`Email: ${booking.guestEmail || '-'}`)
+            .text(`Тип: ${typeLabel}`)
+            .text(`Объект: ${itemName || '-'}`)
+            .text(`Даты: ${booking.checkIn || '-'} — ${booking.checkOut || '-'}`)
+            .text(`Гостей: ${booking.guestsCount || '-'}`)
+            .text(`Итого: ${booking.totalPrice || 0} GEL`)
+            .text(`Статус: ${statusLabel}`)
+            .moveDown()
+            .text('Спасибо! Чек сформирован автоматически.');
+
+        doc.end();
+    } catch (error) {
+        console.error('❌ PDF receipt error:', error);
+        if (!res.headersSent) {
+            res.status(500).send('Ошибка создания PDF: ' + error.message);
+        }
     }
-    const data = loadBookings();
-    const booking = data.bookings.find(b => String(b.id) === String(req.params.id));
-    if (!booking) return res.status(404).send('Бронирование не найдено');
-    if (!PDFDocument) return res.status(500).send('Установите зависимости: npm install');
-
-    res.setHeader('Content-Type', 'application/pdf; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename=receipt-${booking.id}.pdf`);
-
-    const fontPath = getPdfFontPath();
-    if (!fontPath) {
-        return res.status(500).send('Не найден Unicode-шрифт для PDF. Установите DejaVu/Noto Sans на сервер или укажите PDF_FONT_PATH в .env.');
-    }
-
-    const doc = new PDFDocument({ margin: 50, bufferPages: true, info: { Title: `Чек бронирования №${booking.id}` } });
-    doc.pipe(res);
-    doc.registerFont('AppFont', fontPath);
-    doc.font('AppFont');
-
-    const typeLabel = (booking.type || 'room') === 'tour' ? 'Тур' : 'Номер';
-    const itemName = (booking.type || 'room') === 'tour' ? booking.tourName : booking.roomName;
-    const statusLabel = booking.status === 'confirmed' ? 'Подтверждено' : booking.status === 'cancelled' ? 'Отменено' : 'Ожидает подтверждения';
-
-    doc.fontSize(20).text('Meskhi House — чек бронирования');
-    doc.moveDown();
-    doc.fontSize(12)
-        .text(`Номер бронирования: ${booking.id}`)
-        .text(`Гость: ${booking.guestName || '-'}`)
-        .text(`Телефон: ${booking.guestPhone || '-'}`)
-        .text(`Telegram: ${booking.guestTelegram || '-'}`)
-        .text(`Email: ${booking.guestEmail || '-'}`)
-        .text(`Тип: ${typeLabel}`)
-        .text(`Объект: ${itemName || '-'}`)
-        .text(`Даты: ${booking.checkIn} — ${booking.checkOut}`)
-        .text(`Гостей: ${booking.guestsCount || '-'}`)
-        .text(`Итого: ${booking.totalPrice || 0} ₾`)
-        .text(`Статус: ${statusLabel}`)
-        .moveDown()
-        .text('Спасибо! Чек сформирован автоматически.');
-
-    doc.end();
 });
 
 // ========== TELEGRAM BOT ==========
