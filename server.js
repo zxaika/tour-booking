@@ -164,7 +164,7 @@ function isRoomAvailable(roomId, checkIn, checkOut) {
     const checkOutDate = new Date(checkOut);
 
     for (const booking of data.bookings) {
-        if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
+        if (String(booking.roomId) === String(roomId) && booking.status !== 'cancelled' && booking.type !== 'tour') {
             const bookingIn = new Date(booking.checkIn);
             const bookingOut = new Date(booking.checkOut);
             if (!(checkOutDate <= bookingIn || checkInDate >= bookingOut)) {
@@ -460,13 +460,15 @@ function bookingToRow(booking) {
     const status = booking.status || 'confirmed';
     const type = booking.type || 'room';
     const createdAt = booking.createdAt || booking.created_at || new Date().toISOString();
+    const updatedAt = new Date().toISOString();
 
-    // ВАЖНО: в таблице bookings используем только колонки id, created_at, data.
-    // type/status/checkIn/checkOut храним внутри JSONB поля data,
-    // потому что отдельных колонок type/status/check_in/check_out в Supabase нет.
+    // ВАЖНО: таблица Supabase bookings имеет только:
+    // id, data, created_at, updated_at.
+    // Поэтому type/status/checkIn/checkOut храним внутри JSONB поля data.
     return {
         id: Number(booking.id),
         created_at: createdAt,
+        updated_at: updatedAt,
         data: {
             ...booking,
             id: Number(booking.id),
@@ -474,7 +476,8 @@ function bookingToRow(booking) {
             status,
             checkIn,
             checkOut,
-            createdAt
+            createdAt,
+            updatedAt
         }
     };
 }
@@ -661,7 +664,7 @@ app.post('/api/check-availability', (req, res) => {
 
         let isAvailable = true;
         for (const booking of data.bookings) {
-            if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
+            if (String(booking.roomId) === String(roomId) && booking.status !== 'cancelled' && booking.type !== 'tour') {
                 try {
                     const bookingIn = new Date(validateDate(booking.checkIn));
                     const bookingOut = new Date(validateDate(booking.checkOut));
@@ -709,7 +712,7 @@ app.post('/api/bookings', async (req, res) => {
         if (bookingType !== 'tour') {
             let isAvailable = true;
             for (const booking of data.bookings) {
-                if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
+                if (String(booking.roomId) === String(roomId) && booking.status !== 'cancelled' && booking.type !== 'tour') {
                     try {
                         const bookingIn = new Date(validateDate(booking.checkIn));
                         const bookingOut = new Date(validateDate(booking.checkOut));
@@ -749,7 +752,7 @@ app.post('/api/bookings', async (req, res) => {
 
         const { error: insertError } = await supabase
             .from('bookings')
-            .insert(bookingToRow(newBooking));
+            .insert([bookingToRow(newBooking)]);
 
         if (insertError) {
             console.error('❌ Ошибка добавления бронирования:', insertError);
@@ -842,7 +845,8 @@ app.post('/api/admin/cancel', async (req, res) => {
         const { error } = await supabase
             .from('bookings')
             .update({
-                data: bookingToRow(booking).data
+                data: bookingToRow(booking).data,
+                updated_at: new Date().toISOString()
             })
             .eq('id', Number(bookingId));
 

@@ -228,16 +228,15 @@ function createRoomCalendar(roomId, roomPrice) {
                 const checkInStr = toLocalDateString(checkIn);
                 const checkOutStr = toLocalDateString(checkOut);
 
-                // Проверяем закрытые даты через сервер
+                // Проверяем закрытые даты и считаем цену через сервер
+                let total = roomPrice * nights;
                 try {
-                    await getQuote({ type: 'room', roomId, checkIn: checkInStr, checkOut: checkOutStr });
+                    total = await getQuote({ type: 'room', roomId, checkIn: checkInStr, checkOut: checkOutStr });
                 } catch (error) {
                     alert('❌ ' + error.message);
                     instance.clear();
                     return;
                 }
-
-                const total = roomPrice * nights;
 
                 const response = await fetch('/api/check-availability', {
                     method: 'POST',
@@ -388,6 +387,7 @@ async function submitBooking(e) {
         type: type,
         roomId: type === 'room' ? id : null,
         roomName: type === 'room' ? name : null,
+        tourId: type === 'tour' ? id : null,
         tourName: type === 'tour' ? name : null,
         guestName: document.getElementById('guestName').value,
         guestPhone: document.getElementById('guestPhone').value,
@@ -410,24 +410,36 @@ async function submitBooking(e) {
     submitBtn.textContent = '⏳ Отправка...';
 
     try {
+        console.log('BOOKING DATA:', bookingData);
+
         const response = await fetch('/api/bookings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(bookingData)
         });
 
-        const result = await response.json();
-
-        if (result.success) {
-            alert('✅ Бронирование успешно создано! Мы свяжемся с вами для подтверждения.');
-            closeBookingForm();
-            await loadBookedDates();
-            location.reload();
-        } else {
-            alert('❌ Ошибка: ' + (result.error || 'Попробуйте позже'));
+        const text = await response.text();
+        let result = {};
+        try {
+            result = text ? JSON.parse(text) : {};
+        } catch (parseError) {
+            console.error('Некорректный ответ /api/bookings:', text);
+            throw new Error('Сервер вернул некорректный ответ');
         }
+
+        console.log('BOOKING RESPONSE:', response.status, result);
+
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Попробуйте позже');
+        }
+
+        alert('✅ Бронирование успешно создано! Мы свяжемся с вами для подтверждения.');
+        closeBookingForm();
+        await loadBookedDates();
+        location.reload();
     } catch (error) {
-        alert('❌ Ошибка подключения к серверу');
+        console.error('Ошибка бронирования:', error);
+        alert('❌ Ошибка: ' + (error.message || 'Ошибка подключения к серверу'));
     } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = '✅ Забронировать';
