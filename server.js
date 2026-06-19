@@ -454,64 +454,48 @@ function loadBookings() {
     return clone(bookingsCache);
 }
 
+function bookingToRow(booking) {
+    const checkIn = booking.checkIn ? toLocalDateString(booking.checkIn) : null;
+    const checkOut = booking.checkOut ? toLocalDateString(booking.checkOut) : null;
+    const status = booking.status || 'confirmed';
+    const createdAt = booking.createdAt || booking.created_at || new Date().toISOString();
+
+    return {
+        id: Number(booking.id),
+        type: booking.type || 'room',
+        status,
+        created_at: createdAt,
+        data: {
+            ...booking,
+            id: Number(booking.id),
+            checkIn,
+            checkOut,
+            status,
+            createdAt
+        }
+    };
+}
+
 async function saveBookings(data) {
     console.log(`📦 saveBookings: ${data.bookings?.length || 0} бронирований`);
 
     bookingsCache = clone(data);
-    const rows = (data.bookings || []).map(booking => {
-        // ПРИНУДИТЕЛЬНО преобразуем даты
-        let checkIn = null;
-        let checkOut = null;
+    const rows = (data.bookings || []).map(bookingToRow);
 
-        if (booking.checkIn) {
-            checkIn = toLocalDateString(booking.checkIn);
-            console.log(`📅 Booking ${booking.id} checkIn: "${checkIn}"`);
-        }
-
-        if (booking.checkOut) {
-            checkOut = toLocalDateString(booking.checkOut);
-            console.log(`📅 Booking ${booking.id} checkOut: "${checkOut}"`);
-        }
-
-        // Проверяем, что даты в правильном формате
-        if (checkIn && !/^\d{4}-\d{2}-\d{2}$/.test(checkIn)) {
-            console.error(`❌ Неверный checkIn для ${booking.id}: "${checkIn}"`);
-            throw new Error(`Invalid checkIn for booking ${booking.id}: "${checkIn}"`);
-        }
-        if (checkOut && !/^\d{4}-\d{2}-\d{2}$/.test(checkOut)) {
-            console.error(`❌ Неверный checkOut для ${booking.id}: "${checkOut}"`);
-            throw new Error(`Invalid checkOut for booking ${booking.id}: "${checkOut}"`);
-        }
-
-        return {
-            id: Number(booking.id),
-            type: booking.type || 'room',
-            status: booking.status || 'confirmed',
-            check_in: checkIn,
-            check_out: checkOut,
-            created_at: booking.createdAt || new Date().toISOString(),
-            data: { ...booking, checkIn, checkOut }
-        };
-    });
-
-    // Удаляем все старые записи
-    const { error: deleteError } = await supabase
-        .from('bookings')
-        .delete()
-        .neq('id', 0);
-    if (deleteError) throw deleteError;
-
-    // Вставляем новые записи
-    if (rows.length) {
-        console.log('📊 Вставляем строки:', rows.map(r => ({ id: r.id, check_in: r.check_in, check_out: r.check_out })));
-        const { error: insertError } = await supabase
-            .from('bookings')
-            .insert(rows);
-        if (insertError) {
-            console.error('❌ Ошибка вставки:', insertError);
-            throw insertError;
-        }
+    if (!rows.length) {
+        console.log('✅ Нет бронирований для сохранения');
+        return;
     }
+
+    const { error } = await supabase
+        .from('bookings')
+        .upsert(rows, { onConflict: 'id' });
+
+    if (error) {
+        console.error('❌ Ошибка сохранения бронирований:', error);
+        throw error;
+    }
+
     console.log('✅ saveBookings завершено');
 }
 
@@ -658,6 +642,10 @@ app.post('/api/check-availability', (req, res) => {
         const validCheckIn = validateDateOrThrow(checkIn, 'checkIn');
         const validCheckOut = validateDateOrThrow(checkOut, 'checkOut');
 
+        if (new Date(validCheckOut) <= new Date(validCheckIn)) {
+            return res.status(400).json({ error: 'Дата выезда должна быть позже даты заезда' });
+        }
+
         const data = loadBookings();
         const prices = loadPrices();
         const checkInDate = new Date(validCheckIn);
@@ -696,19 +684,26 @@ app.post('/api/bookings', async (req, res) => {
 
         console.log('📥 /api/bookings:', { type, roomId, checkIn, checkOut, guestName });
 
+        const bookingType = type || 'room';
         const validCheckIn = validateDateOrThrow(checkIn, 'checkIn');
-        const validCheckOut = validateDateOrThrow(checkOut, 'checkOut');
+        const validCheckOut = bookingType === 'tour'
+            ? (checkOut ? validateDateOrThrow(checkOut, 'checkOut') : validCheckIn)
+            : validateDateOrThrow(checkOut, 'checkOut');
+
+        if (bookingType !== 'tour' && new Date(validCheckOut) <= new Date(validCheckIn)) {
+            return res.status(400).json({ error: 'Дата выезда должна быть позже даты заезда' });
+        }
 
         const data = loadBookings();
         const prices = loadPrices();
         const checkInDate = new Date(validCheckIn);
         const checkOutDate = new Date(validCheckOut);
-        const closedDate = hasClosedDates(validCheckIn, validCheckOut, type || 'room', prices);
+        const closedDate = hasClosedDates(validCheckIn, validCheckOut, bookingType, prices);
         if (closedDate) {
             return res.status(400).json({ error: `Бронирование закрыто на дату ${formatRuDate(closedDate)}` });
         }
 
-        if (type !== 'tour') {
+        if (bookingType !== 'tour') {
             let isAvailable = true;
             for (const booking of data.bookings) {
                 if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
@@ -731,7 +726,7 @@ app.post('/api/bookings', async (req, res) => {
 
         const newBooking = {
             id: Date.now(),
-            type: type || 'room',
+            type: bookingType,
             roomId: roomId || null,
             roomName: roomName || null,
             tourId: tourId || null,
@@ -743,14 +738,22 @@ app.post('/api/bookings', async (req, res) => {
             guestsCount: guestsCount || 1,
             checkIn: validCheckIn,
             checkOut: validCheckOut,
-            totalPrice: calculateBookingPrice({ type, roomId, tourId, tourName, checkIn: validCheckIn, checkOut: validCheckOut, guestsCount, clientTotal: totalPrice, prices }),
+            totalPrice: calculateBookingPrice({ type: bookingType, roomId, tourId, tourName, checkIn: validCheckIn, checkOut: validCheckOut, guestsCount, clientTotal: totalPrice, prices }),
             status: 'confirmed',
             notes: notes || '',
             createdAt: new Date().toISOString()
         };
 
-        data.bookings.push(newBooking);
-        await saveBookings(data);
+        const { error: insertError } = await supabase
+            .from('bookings')
+            .insert(bookingToRow(newBooking));
+
+        if (insertError) {
+            console.error('❌ Ошибка добавления бронирования:', insertError);
+            throw insertError;
+        }
+
+        bookingsCache.bookings.push(newBooking);
         await sendTelegramNotification(newBooking);
 
         res.json({ success: true, booking: newBooking });
@@ -788,25 +791,65 @@ app.post('/api/admin/bookings', async (req, res) => {
 });
 
 app.post('/api/admin/delete', async (req, res) => {
-    const { bookingId } = req.body;
-    if (!requireAdmin(req, res)) return;
-    const data = loadBookings();
-    data.bookings = data.bookings.filter(b => String(b.id) !== String(bookingId));
-    await saveBookings(data);
-    res.json({ success: true });
+    try {
+        const { bookingId } = req.body;
+        if (!requireAdmin(req, res)) return;
+
+        if (!bookingId) {
+            return res.status(400).json({ error: 'bookingId обязателен' });
+        }
+
+        const { error } = await supabase
+            .from('bookings')
+            .delete()
+            .eq('id', Number(bookingId));
+
+        if (error) throw error;
+
+        bookingsCache.bookings = bookingsCache.bookings.filter(
+            b => String(b.id) !== String(bookingId)
+        );
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('❌ /api/admin/delete error:', error);
+        res.status(400).json({ error: error.message });
+    }
 });
 
 app.post('/api/admin/cancel', async (req, res) => {
-    const { bookingId } = req.body;
-    if (!requireAdmin(req, res)) return;
-    const data = loadBookings();
-    const booking = data.bookings.find(b => String(b.id) === String(bookingId));
-    if (booking) {
+    try {
+        const { bookingId } = req.body;
+        if (!requireAdmin(req, res)) return;
+
+        if (!bookingId) {
+            return res.status(400).json({ error: 'bookingId обязателен' });
+        }
+
+        const booking = bookingsCache.bookings.find(
+            b => String(b.id) === String(bookingId)
+        );
+
+        if (!booking) {
+            return res.status(404).json({ error: 'Бронирование не найдено' });
+        }
+
         booking.status = 'cancelled';
-        await saveBookings(data);
+
+        const { error } = await supabase
+            .from('bookings')
+            .update({
+                status: 'cancelled',
+                data: bookingToRow(booking).data
+            })
+            .eq('id', Number(bookingId));
+
+        if (error) throw error;
+
         res.json({ success: true });
-    } else {
-        res.status(404).json({ error: 'Бронирование не найдено' });
+    } catch (error) {
+        console.error('❌ /api/admin/cancel error:', error);
+        res.status(400).json({ error: error.message });
     }
 });
 
