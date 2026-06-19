@@ -458,19 +458,22 @@ function bookingToRow(booking) {
     const checkIn = booking.checkIn ? toLocalDateString(booking.checkIn) : null;
     const checkOut = booking.checkOut ? toLocalDateString(booking.checkOut) : null;
     const status = booking.status || 'confirmed';
+    const type = booking.type || 'room';
     const createdAt = booking.createdAt || booking.created_at || new Date().toISOString();
 
+    // ВАЖНО: в таблице bookings используем только колонки id, created_at, data.
+    // type/status/checkIn/checkOut храним внутри JSONB поля data,
+    // потому что отдельных колонок type/status/check_in/check_out в Supabase нет.
     return {
         id: Number(booking.id),
-        type: booking.type || 'room',
-        status,
         created_at: createdAt,
         data: {
             ...booking,
             id: Number(booking.id),
+            type,
+            status,
             checkIn,
             checkOut,
-            status,
             createdAt
         }
     };
@@ -839,7 +842,6 @@ app.post('/api/admin/cancel', async (req, res) => {
         const { error } = await supabase
             .from('bookings')
             .update({
-                status: 'cancelled',
                 data: bookingToRow(booking).data
             })
             .eq('id', Number(bookingId));
