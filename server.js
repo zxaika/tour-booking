@@ -164,7 +164,7 @@ function isRoomAvailable(roomId, checkIn, checkOut) {
     const checkOutDate = new Date(checkOut);
 
     for (const booking of data.bookings) {
-        if (String(booking.roomId) === String(roomId) && booking.status !== 'cancelled' && booking.type !== 'tour') {
+        if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
             const bookingIn = new Date(booking.checkIn);
             const bookingOut = new Date(booking.checkOut);
             if (!(checkOutDate <= bookingIn || checkInDate >= bookingOut)) {
@@ -382,22 +382,7 @@ async function initData() {
     tgStateCache = tgRow?.value || {};
     if (!tgRow) await supabase.from('app_settings').upsert({ key: 'telegram_state', value: tgStateCache });
 
-    const { data: bookingRows, error: bookingsError } = await supabase
-        .from('bookings')
-        .select('id,data')
-        .order('created_at', { ascending: true });
-    if (bookingsError) throw bookingsError;
-
-    // Обрабатываем даты при загрузке
-    bookingsCache = { bookings: (bookingRows || []).map(row => {
-            const data = row.data || {};
-            return {
-                ...data,
-                id: row.id,
-                checkIn: data.checkIn ? toLocalDateString(data.checkIn) : null,
-                checkOut: data.checkOut ? toLocalDateString(data.checkOut) : null
-            };
-        }) };
+    await loadBookingsFromDb();
 
     await loadAdminAccounts();
 }
@@ -454,21 +439,46 @@ function loadBookings() {
     return clone(bookingsCache);
 }
 
+
+async function loadBookingsFromDb() {
+    const { data, error } = await supabase
+        .from('bookings')
+        .select('id,data,created_at,updated_at')
+        .order('created_at', { ascending: true });
+
+    if (error) throw error;
+
+    const bookings = (data || []).map(row => {
+        const saved = row.data || {};
+        const createdAt = saved.createdAt || row.created_at || new Date().toISOString();
+        return {
+            ...saved,
+            id: row.id,
+            type: saved.type || 'room',
+            status: saved.status || 'confirmed',
+            createdAt,
+            checkIn: saved.checkIn ? toLocalDateString(saved.checkIn) : null,
+            checkOut: saved.checkOut ? toLocalDateString(saved.checkOut) : null
+        };
+    });
+
+    bookingsCache = { bookings };
+    return bookingsCache;
+}
+
 function bookingToRow(booking) {
     const checkIn = booking.checkIn ? toLocalDateString(booking.checkIn) : null;
     const checkOut = booking.checkOut ? toLocalDateString(booking.checkOut) : null;
     const status = booking.status || 'confirmed';
     const type = booking.type || 'room';
     const createdAt = booking.createdAt || booking.created_at || new Date().toISOString();
-    const updatedAt = new Date().toISOString();
 
-    // ВАЖНО: таблица Supabase bookings имеет только:
-    // id, data, created_at, updated_at.
-    // Поэтому type/status/checkIn/checkOut храним внутри JSONB поля data.
+    // ВАЖНО: в таблице bookings используем только колонки id, created_at, data.
+    // type/status/checkIn/checkOut храним внутри JSONB поля data,
+    // потому что отдельных колонок type/status/check_in/check_out в Supabase нет.
     return {
         id: Number(booking.id),
         created_at: createdAt,
-        updated_at: updatedAt,
         data: {
             ...booking,
             id: Number(booking.id),
@@ -476,8 +486,7 @@ function bookingToRow(booking) {
             status,
             checkIn,
             checkOut,
-            createdAt,
-            updatedAt
+            createdAt
         }
     };
 }
@@ -609,8 +618,8 @@ app.post('/api/quote', (req, res) => {
         return res.status(400).json({ error: error.message });
     }
 });
-app.get('/api/booked-dates', (req, res) => {
-    const data = loadBookings();
+app.get('/api/booked-dates', async (req, res) => {
+    const data = await loadBookingsFromDb();
     const bookedDates = {};
 
     data.bookings.forEach(booking => {
@@ -641,7 +650,7 @@ app.get('/api/booked-dates', (req, res) => {
     res.json(bookedDates);
 });
 
-app.post('/api/check-availability', (req, res) => {
+app.post('/api/check-availability', async (req, res) => {
     try {
         const { roomId, checkIn, checkOut } = req.body;
 
@@ -652,7 +661,7 @@ app.post('/api/check-availability', (req, res) => {
             return res.status(400).json({ error: 'Дата выезда должна быть позже даты заезда' });
         }
 
-        const data = loadBookings();
+        const data = await loadBookingsFromDb();
         const prices = loadPrices();
         const checkInDate = new Date(validCheckIn);
         const checkOutDate = new Date(validCheckOut);
@@ -664,7 +673,7 @@ app.post('/api/check-availability', (req, res) => {
 
         let isAvailable = true;
         for (const booking of data.bookings) {
-            if (String(booking.roomId) === String(roomId) && booking.status !== 'cancelled' && booking.type !== 'tour') {
+            if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
                 try {
                     const bookingIn = new Date(validateDate(booking.checkIn));
                     const bookingOut = new Date(validateDate(booking.checkOut));
@@ -700,7 +709,7 @@ app.post('/api/bookings', async (req, res) => {
             return res.status(400).json({ error: 'Дата выезда должна быть позже даты заезда' });
         }
 
-        const data = loadBookings();
+        const data = await loadBookingsFromDb();
         const prices = loadPrices();
         const checkInDate = new Date(validCheckIn);
         const checkOutDate = new Date(validCheckOut);
@@ -712,7 +721,7 @@ app.post('/api/bookings', async (req, res) => {
         if (bookingType !== 'tour') {
             let isAvailable = true;
             for (const booking of data.bookings) {
-                if (String(booking.roomId) === String(roomId) && booking.status !== 'cancelled' && booking.type !== 'tour') {
+                if (booking.roomId === roomId && booking.status !== 'cancelled' && booking.type !== 'tour') {
                     try {
                         const bookingIn = new Date(validateDate(booking.checkIn));
                         const bookingOut = new Date(validateDate(booking.checkOut));
@@ -759,7 +768,7 @@ app.post('/api/bookings', async (req, res) => {
             throw insertError;
         }
 
-        bookingsCache.bookings.push(newBooking);
+        await loadBookingsFromDb();
         await sendTelegramNotification(newBooking);
 
         res.json({ success: true, booking: newBooking });
@@ -771,29 +780,34 @@ app.post('/api/bookings', async (req, res) => {
 
 // ========== АДМИН API ==========
 app.post('/api/admin/bookings', async (req, res) => {
-    const { filter } = req.body;
-    if (!requireAdmin(req, res)) return;
+    try {
+        const { filter } = req.body;
+        if (!requireAdmin(req, res)) return;
 
-    let data = loadBookings();
-    let bookings = [...data.bookings];
-    const now = new Date();
+        const data = await loadBookingsFromDb();
+        let bookings = [...data.bookings];
+        const now = new Date();
 
-    if (filter && filter !== 'all') {
-        if (filter === 'year') {
-            const yearAgo = new Date();
-            yearAgo.setFullYear(now.getFullYear() - 1);
-            bookings = bookings.filter(b => new Date(b.createdAt) >= yearAgo);
-        } else {
-            const days = parseInt(filter);
-            if (!isNaN(days)) {
-                const cutoffDate = new Date();
-                cutoffDate.setDate(now.getDate() - days);
-                bookings = bookings.filter(b => new Date(b.createdAt) >= cutoffDate);
+        if (filter && filter !== 'all') {
+            if (filter === 'year') {
+                const yearAgo = new Date();
+                yearAgo.setFullYear(now.getFullYear() - 1);
+                bookings = bookings.filter(b => new Date(b.createdAt || b.checkIn || 0) >= yearAgo);
+            } else {
+                const days = parseInt(filter);
+                if (!isNaN(days)) {
+                    const cutoffDate = new Date();
+                    cutoffDate.setDate(now.getDate() - days);
+                    bookings = bookings.filter(b => new Date(b.createdAt || b.checkIn || 0) >= cutoffDate);
+                }
             }
         }
-    }
 
-    res.json({ bookings });
+        res.json({ bookings });
+    } catch (error) {
+        console.error('❌ /api/admin/bookings error:', error);
+        res.status(400).json({ error: error.message });
+    }
 });
 
 app.post('/api/admin/delete', async (req, res) => {
@@ -812,9 +826,7 @@ app.post('/api/admin/delete', async (req, res) => {
 
         if (error) throw error;
 
-        bookingsCache.bookings = bookingsCache.bookings.filter(
-            b => String(b.id) !== String(bookingId)
-        );
+        await loadBookingsFromDb();
 
         res.json({ success: true });
     } catch (error) {
@@ -832,9 +844,8 @@ app.post('/api/admin/cancel', async (req, res) => {
             return res.status(400).json({ error: 'bookingId обязателен' });
         }
 
-        const booking = bookingsCache.bookings.find(
-            b => String(b.id) === String(bookingId)
-        );
+        const data = await loadBookingsFromDb();
+        const booking = data.bookings.find(b => String(b.id) === String(bookingId));
 
         if (!booking) {
             return res.status(404).json({ error: 'Бронирование не найдено' });
@@ -844,14 +855,12 @@ app.post('/api/admin/cancel', async (req, res) => {
 
         const { error } = await supabase
             .from('bookings')
-            .update({
-                data: bookingToRow(booking).data,
-                updated_at: new Date().toISOString()
-            })
+            .update({ data: bookingToRow(booking).data })
             .eq('id', Number(bookingId));
 
         if (error) throw error;
 
+        await loadBookingsFromDb();
         res.json({ success: true });
     } catch (error) {
         console.error('❌ /api/admin/cancel error:', error);
@@ -860,33 +869,40 @@ app.post('/api/admin/cancel', async (req, res) => {
 });
 
 app.post('/api/admin/calendar', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    try {
+        if (!requireAdmin(req, res)) return;
 
-    const days = {};
-    getActiveBookings().forEach(booking => {
-        eachBookedDay(booking, (dateStr) => {
-            if (!days[dateStr]) days[dateStr] = [];
-            days[dateStr].push({
-                id: booking.id,
-                type: booking.type || 'room',
-                itemName: booking.type === 'tour' ? booking.tourName : booking.roomName,
-                guestName: booking.guestName,
-                guestPhone: booking.guestPhone
+        await loadBookingsFromDb();
+        const days = {};
+        getActiveBookings().forEach(booking => {
+            eachBookedDay(booking, (dateStr) => {
+                if (!days[dateStr]) days[dateStr] = [];
+                days[dateStr].push({
+                    id: booking.id,
+                    type: booking.type || 'room',
+                    itemName: booking.type === 'tour' ? booking.tourName : booking.roomName,
+                    guestName: booking.guestName,
+                    guestPhone: booking.guestPhone
+                });
             });
         });
-    });
-    const prices = loadPrices();
-    Object.entries(prices.closedDates || {}).forEach(([dateStr, info]) => {
-        if (!days[dateStr]) days[dateStr] = [];
-        days[dateStr].push({
-            id: `closed-${dateStr}`,
-            type: 'closed',
-            itemName: 'Закрыто для бронирования',
-            guestName: info.reason || 'Закрыто администратором',
-            guestPhone: ''
+
+        const prices = loadPrices();
+        Object.entries(prices.closedDates || {}).forEach(([dateStr, info]) => {
+            if (!days[dateStr]) days[dateStr] = [];
+            days[dateStr].push({
+                id: `closed-${dateStr}`,
+                type: 'closed',
+                itemName: 'Закрыто для бронирования',
+                guestName: info.reason || 'Закрыто администратором',
+                guestPhone: ''
+            });
         });
-    });
-    res.json({ days });
+        res.json({ days });
+    } catch (error) {
+        console.error('❌ /api/admin/calendar error:', error);
+        res.status(400).json({ error: error.message });
+    }
 });
 
 app.post('/api/admin/admins/create', async (req, res) => {
@@ -906,17 +922,29 @@ app.post('/api/admin/admins/create', async (req, res) => {
 });
 
 app.post('/api/admin/stats', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    const data = loadBookings();
-    const total = data.bookings.length;
-    const active = data.bookings.filter(b => b.status === 'confirmed').length;
-    const confirmed = data.bookings.filter(b => b.status === 'confirmed');
-    const revenue = confirmed.reduce((sum, b) => sum + Number(b.totalPrice || 0), 0);
-    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
-    const monthRevenue = confirmed.filter(b => new Date(b.createdAt || b.checkIn) >= monthStart).reduce((sum, b) => sum + Number(b.totalPrice || 0), 0);
-    const futureRevenue = confirmed.filter(b => new Date(b.checkIn) >= new Date()).reduce((sum, b) => sum + Number(b.totalPrice || 0), 0);
-    const avgBooking = confirmed.length ? Math.round(revenue / confirmed.length) : 0;
-    res.json({ total, active, cancelled: total - active, revenue, monthRevenue, futureRevenue, avgBooking });
+    try {
+        if (!requireAdmin(req, res)) return;
+
+        const data = await loadBookingsFromDb();
+        const total = data.bookings.length;
+        const active = data.bookings.filter(b => b.status === 'confirmed').length;
+        const confirmed = data.bookings.filter(b => b.status === 'confirmed');
+        const revenue = confirmed.reduce((sum, b) => sum + Number(b.totalPrice || 0), 0);
+        const monthStart = new Date();
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const monthRevenue = confirmed
+            .filter(b => new Date(b.createdAt || b.checkIn || 0) >= monthStart)
+            .reduce((sum, b) => sum + Number(b.totalPrice || 0), 0);
+        const futureRevenue = confirmed
+            .filter(b => new Date(b.checkIn || 0) >= new Date())
+            .reduce((sum, b) => sum + Number(b.totalPrice || 0), 0);
+        const avgBooking = confirmed.length ? Math.round(revenue / confirmed.length) : 0;
+        res.json({ total, active, cancelled: total - active, revenue, monthRevenue, futureRevenue, avgBooking });
+    } catch (error) {
+        console.error('❌ /api/admin/stats error:', error);
+        res.status(400).json({ error: error.message });
+    }
 });
 
 app.post('/api/admin/move-booking', async (req, res) => {
@@ -926,7 +954,7 @@ app.post('/api/admin/move-booking', async (req, res) => {
     try {
         const validNewCheckIn = validateDateOrThrow(newCheckIn, 'newCheckIn');
 
-        const data = loadBookings();
+        const data = await loadBookingsFromDb();
         const prices = loadPrices();
         const booking = data.bookings.find(b => String(b.id) === String(bookingId));
         if (!booking) return res.status(404).json({ error: 'Бронирование не найдено' });
@@ -1022,88 +1050,66 @@ ${booking.type === 'tour' ? `🎯 Тур: ${booking.tourName}` : `🛏 Номе�
 }
 
 // ========== PDF ==========
-// ========== PDF ==========
 function getPdfFontPath() {
     const candidates = [
         process.env.PDF_FONT_PATH,
-        path.join(__dirname, 'public', 'fonts', 'DejaVuSans.ttf'),
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf',
+        '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+        '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+        '/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf',
+        '/Library/Fonts/Arial Unicode.ttf',
+        '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+        'C:\\Windows\\Fonts\\arial.ttf',
+        'C:\\Windows\\Fonts\\segoeui.ttf'
     ].filter(Boolean);
-
     return candidates.find(file => fs.existsSync(file));
 }
 
-app.get('/api/admin/receipt/:id.pdf', async (req, res) => {
-    try {
-        if (!isAdminAuthorized({ username: req.query.username, password: req.query.password })) {
-            return res.status(401).send('Неверный логин или пароль');
-        }
-
-        if (!PDFDocument) {
-            return res.status(500).send('PDFKit не установлен. Выполните npm install pdfkit');
-        }
-
-        const { data: row, error } = await supabase
-            .from('bookings')
-            .select('id,data')
-            .eq('id', Number(req.params.id))
-            .maybeSingle();
-
-        if (error) throw error;
-        if (!row) return res.status(404).send('Бронирование не найдено');
-
-        const booking = {
-            id: row.id,
-            ...(row.data || {})
-        };
-
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="receipt-${booking.id}.pdf"`);
-
-        const doc = new PDFDocument({ margin: 50 });
-        doc.pipe(res);
-
-        const fontPath = getPdfFontPath();
-        if (fontPath) {
-            doc.registerFont('AppFont', fontPath);
-            doc.font('AppFont');
-        }
-
-        const typeLabel = (booking.type || 'room') === 'tour' ? 'Тур' : 'Номер';
-        const itemName = (booking.type || 'room') === 'tour'
-            ? booking.tourName
-            : booking.roomName;
-
-        const statusLabel =
-            booking.status === 'confirmed' ? 'Подтверждено' :
-                booking.status === 'cancelled' ? 'Отменено' :
-                    'Ожидает подтверждения';
-
-        doc.fontSize(20).text('Meskhi House — чек бронирования');
-        doc.moveDown();
-
-        doc.fontSize(12)
-            .text(`Номер бронирования: ${booking.id}`)
-            .text(`Гость: ${booking.guestName || '-'}`)
-            .text(`Телефон: ${booking.guestPhone || '-'}`)
-            .text(`Telegram: ${booking.guestTelegram || '-'}`)
-            .text(`Email: ${booking.guestEmail || '-'}`)
-            .text(`Тип: ${typeLabel}`)
-            .text(`Объект: ${itemName || '-'}`)
-            .text(`Даты: ${booking.checkIn || '-'} — ${booking.checkOut || '-'}`)
-            .text(`Гостей: ${booking.guestsCount || '-'}`)
-            .text(`Итого: ${booking.totalPrice || 0} GEL`)
-            .text(`Статус: ${statusLabel}`)
-            .moveDown()
-            .text('Спасибо! Чек сформирован автоматически.');
-
-        doc.end();
-    } catch (error) {
-        console.error('❌ PDF receipt error:', error);
-        if (!res.headersSent) {
-            res.status(500).send('Ошибка создания PDF: ' + error.message);
-        }
+app.get('/api/admin/receipt/:id.pdf', (req, res) => {
+    if (!isAdminAuthorized({ username: req.query.username, password: req.query.password })) {
+        return res.status(401).send('Неверный логин или пароль');
     }
+    const data = loadBookings();
+    const booking = data.bookings.find(b => String(b.id) === String(req.params.id));
+    if (!booking) return res.status(404).send('Бронирование не найдено');
+    if (!PDFDocument) return res.status(500).send('Установите зависимости: npm install');
+
+    res.setHeader('Content-Type', 'application/pdf; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=receipt-${booking.id}.pdf`);
+
+    const fontPath = getPdfFontPath();
+    if (!fontPath) {
+        return res.status(500).send('Не найден Unicode-шрифт для PDF. Установите DejaVu/Noto Sans на сервер или укажите PDF_FONT_PATH в .env.');
+    }
+
+    const doc = new PDFDocument({ margin: 50, bufferPages: true, info: { Title: `Чек бронирования №${booking.id}` } });
+    doc.pipe(res);
+    doc.registerFont('AppFont', fontPath);
+    doc.font('AppFont');
+
+    const typeLabel = (booking.type || 'room') === 'tour' ? 'Тур' : 'Номер';
+    const itemName = (booking.type || 'room') === 'tour' ? booking.tourName : booking.roomName;
+    const statusLabel = booking.status === 'confirmed' ? 'Подтверждено' : booking.status === 'cancelled' ? 'Отменено' : 'Ожидает подтверждения';
+
+    doc.fontSize(20).text('Meskhi House — чек бронирования');
+    doc.moveDown();
+    doc.fontSize(12)
+        .text(`Номер бронирования: ${booking.id}`)
+        .text(`Гость: ${booking.guestName || '-'}`)
+        .text(`Телефон: ${booking.guestPhone || '-'}`)
+        .text(`Telegram: ${booking.guestTelegram || '-'}`)
+        .text(`Email: ${booking.guestEmail || '-'}`)
+        .text(`Тип: ${typeLabel}`)
+        .text(`Объект: ${itemName || '-'}`)
+        .text(`Даты: ${booking.checkIn} — ${booking.checkOut}`)
+        .text(`Гостей: ${booking.guestsCount || '-'}`)
+        .text(`Итого: ${booking.totalPrice || 0} ₾`)
+        .text(`Статус: ${statusLabel}`)
+        .moveDown()
+        .text('Спасибо! Чек сформирован автоматически.');
+
+    doc.end();
 });
 
 // ========== TELEGRAM BOT ==========
